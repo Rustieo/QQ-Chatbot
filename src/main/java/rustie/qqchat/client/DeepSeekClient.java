@@ -114,14 +114,7 @@ public class DeepSeekClient {
 
         // 1. 构建统一的 system 指令（规则 + 参考信息）
         StringBuilder sysBuilder = new StringBuilder();
-        if(systemRole==null){
-            if(promptCfg.getRules()!=null){
-                systemRole=promptCfg.getRules();
-            }else{
-                systemRole="You are a helpful assistant.";
-            }
-        }
-        String rules=systemRole;
+        String rules=promptCfg.getRules();
         if (rules != null) {
             sysBuilder.append(rules).append("\n\n");
         }

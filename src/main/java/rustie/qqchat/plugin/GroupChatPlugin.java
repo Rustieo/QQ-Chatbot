@@ -34,13 +34,20 @@ public class GroupChatPlugin {
 
     @GroupMessageHandler
     @MessageHandlerFilter(at = AtEnum.NEED)
-    public void callDeepSeek(Bot bot, GroupMessageEvent event) {
+    public void normalChat(Bot bot, GroupMessageEvent event) {
         String rawMessage = event.getMessage();
         if(rawMessage.startsWith("/"))return;
         String message=rawMessage.replaceAll("\\s+", " ").trim();
         String response = chatService.handleUserMessage(message);
         String sendMsg = MsgUtils.builder().text(response).build();
         bot.sendGroupMsg(event.getGroupId(), sendMsg, false);
+    }
+    @GroupMessageHandler
+    @MessageHandlerFilter(at = AtEnum.NEED,startWith = "/role")
+    public void changeRoleWithDS(Bot bot, GroupMessageEvent event) {
+        String rawMessage = event.getMessage().replaceFirst("/role", "").trim();
+        String role=rawMessage.replaceAll("\\s+", " ").trim();
+        //TODO 根据role调用Deepseek,生成system prompt,然后设置
     }
 
 }

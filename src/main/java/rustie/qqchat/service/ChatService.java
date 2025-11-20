@@ -25,12 +25,10 @@ public class ChatService {
         this.history = new ArrayList<>();
     }
     public  String handleUserMessage(String userMessage) {
-
             // 调用 DeepSeekClient 获取回复
             String response = deepSeekClient.normalResponse(userMessage, "", history);
             updateConversationHistory(userMessage, response);
             return response;
-
     }
 
 //    public String handleGroupMessage(long groupId, String userMessage) {
@@ -61,6 +59,9 @@ public class ChatService {
         if (history.size() > 20) {
             history = history.subList(history.size() - 20, history.size());
         }
+    }
+    public void clearHistory() {
+        history.clear();
     }
 
 }
