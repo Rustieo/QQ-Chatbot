@@ -2,7 +2,8 @@ package rustie.qqchat.service;
 
 import org.springframework.stereotype.Service;
 import rustie.qqchat.config.AiProperties;
-import rustie.qqchat.service.ChatService;
+import rustie.qqchat.client.ModelType;
+import rustie.qqchat.client.LLMClient;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -20,6 +21,8 @@ public class SettingService {
     public static final String LIMIT_DEL_COMMAND = "/set/ai/limit/del";
     public static final String LIMIT_LIST_COMMAND = "/set/ai/limit/list";
     public static final String LIMIT_CLEAR_COMMAND = "/set/ai/limit/clear";
+    // 新增: 模型切换命令
+    public static final String MODEL_SWITCH_COMMAND = "/set/ai/model";
 
     private final AiProperties aiProperties;
     private final ChatService chatService;
@@ -156,6 +159,30 @@ public class SettingService {
         return limits;
     }
 
+    // ================== 模型切换 ==================
+    public CommandResult switchModel(String rawMessage, LLMClient llmClient) {
+        String payload = extractPayload(rawMessage, MODEL_SWITCH_COMMAND);
+        if (payload.isEmpty()) {
+            return CommandResult.failure("请提供模型名称，如 deepseek 或 qwen");
+        }
+        String name = payload.toLowerCase();
+        ModelType type = null;
+        if (name.startsWith("deep")|| name.startsWith("ds")) {
+            type = ModelType.DeepSeek;
+        } else if (name.startsWith("qwen") || name.startsWith("qw")) {
+            type = ModelType.Qwen;
+        }
+        if (type == null) {
+            return CommandResult.failure("未知模型名称: " + payload);
+        }
+        boolean ok = llmClient.switchModel(type);
+        if (!ok) {
+            return CommandResult.failure("模型切换失败: 未配置 " + type);
+        }
+        chatService.clearHistory();
+        return CommandResult.success("已切换到模型: " + type);
+    }
+
     public String buildHelpMessage() {
         StringBuilder sb = new StringBuilder();
         sb.append("【基础对话】\n");
@@ -166,6 +193,7 @@ public class SettingService {
 
         sb.append("【RAG 问答】\n");
         sb.append("[群] /rq 问题内容  使用知识库进行回答。\n");
+        sb.append("[群] /rq/ex 问题内容  使用知识库进行回答,并输出执行流程 \n");
         sb.append("------\n");
         sb.append("【角色 & 系统设置】\n");
         sb.append("[群] /role 描述  让 DeepSeek 根据描述生成系统提示词并更新。\n\n");
@@ -183,6 +211,9 @@ public class SettingService {
         sb.append("示例：").append(LIMIT_DEL_COMMAND).append(" 不要泄露用户个人信息。 (按文本删除)\n\n");
         sb.append("[群] ").append(LIMIT_LIST_COMMAND).append("  查看当前全部规则。\n\n");
         sb.append("[群] ").append(LIMIT_CLEAR_COMMAND).append("  清空全部行为规则。\n\n");
+        sb.append("------\n");
+        sb.append("【模型切换】\n");
+        sb.append("[群] ").append(MODEL_SWITCH_COMMAND).append(" (deepseek/ds)|(qwen/qw)  切换当前使用的模型。\n\n");;
         sb.append("------\n");
         sb.append("【知识库管理（RAG）】\n");
         sb.append("[群] /rag/add/common 文本  将文本加入知识库（不带昵称等元信息）。\n\n");

@@ -3,6 +3,7 @@ package rustie.qqchat.client;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.annotation.Nullable;
+import lombok.Data;
 import lombok.Getter;
 import lombok.Setter;
 import lombok.extern.slf4j.Slf4j;
@@ -16,6 +17,7 @@ import org.springframework.web.reactive.function.client.WebClient;
 import rustie.qqchat.config.AiProperties;
 
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -23,31 +25,56 @@ import java.util.Map;
 @Slf4j
 @Getter
 @Setter
-public class DeepSeekClient {
+public class LLMClient {
 
-    private final WebClient webClient;
-    private final String apiKey;
-    private final String model;
+    // 可切换的运行时字段（去掉 final 以便动态更换模型）
+    private WebClient webClient;
+    private String apiKey;
+    private String model;
     private final AiProperties aiProperties;
     private String systemRole;
-    private static final Logger logger = LoggerFactory.getLogger(DeepSeekClient.class);
+    private static final Logger logger = LoggerFactory.getLogger(LLMClient.class);
     private final List<String> buffer = new ArrayList<>();
+    private final Map<ModelType, ModelInfo> models = new HashMap<>();
+    private ModelType currentModelType;
 
-    public DeepSeekClient(@Value("${deepseek.api.url}") String apiUrl,
-                          @Value("${deepseek.api.key}") String apiKey,
-                          @Value("${deepseek.api.model}") String model,
-                          AiProperties aiProperties) {
-        WebClient.Builder builder = WebClient.builder().baseUrl(apiUrl);
-
-        // 只有当 API key 不为空时才添加 Authorization header
-        if (apiKey != null && !apiKey.trim().isEmpty()) {
-            builder.defaultHeader(HttpHeaders.AUTHORIZATION, "Bearer " + apiKey);
-        }
-
-        this.webClient = builder.build();
-        this.apiKey = apiKey;
-        this.model = model;
+    /**
+     * 单构造：初始化所有可用模型配置，并默认启用 DeepSeek
+     */
+    public LLMClient(@Value("${deepseek.api.url}") String deepSeekUrl,
+                     @Value("${deepseek.api.key}") String deepSeekKey,
+                     @Value("${deepseek.api.model}") String deepSeekModel,
+                     @Value("${qwen.api.url}") String qwenUrl,
+                     @Value("${qwen.api.key}") String qwenKey,
+                     @Value("${qwen.api.model}") String qwenModel,
+                     AiProperties aiProperties) {
         this.aiProperties = aiProperties;
+        // 初始化模型信息表
+        models.put(ModelType.DeepSeek, new ModelInfo(deepSeekUrl, deepSeekKey, deepSeekModel));
+        models.put(ModelType.Qwen, new ModelInfo(qwenUrl, qwenKey, qwenModel));
+        // 默认使用 DeepSeek
+        switchModel(ModelType.DeepSeek);
+    }
+
+    /**
+     * 切换当前使用的模型。如果模型配置不存在则返回 false。
+     */
+    public synchronized boolean switchModel(ModelType type) {
+        ModelInfo info = models.get(type);
+        if (info == null) {
+            logger.error("尝试切换到未配置的模型: {}", type);
+            return false;
+        }
+        WebClient.Builder builder = WebClient.builder().baseUrl(info.url);
+        if (info.apiKey != null && !info.apiKey.isBlank()) {
+            builder.defaultHeader(HttpHeaders.AUTHORIZATION, "Bearer " + info.apiKey);
+        }
+        this.webClient = builder.build();
+        this.apiKey = info.apiKey;
+        this.model = info.model;
+        this.currentModelType = type;
+        logger.info("已切换模型为: {} (model={})", type, this.model);
+        return true;
     }
 
     /**
@@ -67,12 +94,12 @@ public class DeepSeekClient {
                     .bodyToMono(String.class)
                     .block(); // 阻塞拿到完整结果
         } catch (Exception e) {
-            logger.error("调用 DeepSeek 接口失败", e);
-            throw new RuntimeException("调用 DeepSeek 接口失败", e);
+            logger.error("调用模型接口失败", e);
+            throw new RuntimeException("调用模型接口失败", e);
         }
         if (raw == null || raw.isEmpty()) {
-            logger.error("DeepSeek 返回空响应");
-            throw new RuntimeException("DeepSeek 返回空响应");
+            logger.error("模型返回空响应");
+            throw new RuntimeException("模型返回空响应");
         }
         return extractFullContent(raw);
     }
@@ -123,11 +150,11 @@ public class DeepSeekClient {
         }
 
         ////聊天规则
-        List<String> limits=promptCfg.getLimits();
-        if (limits != null&&!limits.isEmpty()) {
+        List<String> limits = promptCfg.getLimits();
+        if (limits != null && !limits.isEmpty()) {
             systemBuilder.append("\n\n【行为准则】\n");
             for (int i = 0; i < limits.size(); i++) {
-                int idx=i+1;
+                int idx = i + 1;
                 systemBuilder.append(idx).append(". ").append(limits.get(i)).append("\n");
             }
 
@@ -141,7 +168,6 @@ public class DeepSeekClient {
         // =================================================================
         // 2. History 区域：历史对话 (History)
         // =================================================================
-        // 放在中间，让模型知道之前的语境，但不会混淆当前的 RAG 资料
         if (history != null && !history.isEmpty()) {
             messages.addAll(history);
         }
@@ -149,7 +175,6 @@ public class DeepSeekClient {
         // =================================================================
         // 3. User 区域：RAG 上下文 + 当前问题 (Context + Question)
         // =================================================================
-        // 构建复合型的用户 prompt，利用近因效应，让模型最关注这里的资料
         StringBuilder userContentBuilder = new StringBuilder();
 
         // A. 注入 RAG 知识 (如果有)
@@ -158,15 +183,13 @@ public class DeepSeekClient {
             userContentBuilder.append("<context>\n");
             userContentBuilder.append(context).append("\n");
             userContentBuilder.append("</context>\n\n");
-            // 可以在这里加一句强化提示，防止模型产生幻觉
+            //这里可以降低幻觉
             userContentBuilder.append("（如果参考信息中没有答案，请直接说明，不要编造。）\n\n");
         } else {
-            // 如果没有 RAG 命中，可以给一个 fallback 提示
             userContentBuilder.append("（暂无参考资料，请根据你的通用知识回答）\n\n");
         }
         // B. 注入当前用户问题
         userContentBuilder.append("我的问题是：").append(userMessage);
-
 
         messages.add(Map.of(
                 "role", "user",
@@ -192,8 +215,8 @@ public class DeepSeekClient {
             // 先检查是否有 error
             JsonNode errorNode = node.path("error");
             if (!errorNode.isMissingNode() && !errorNode.isNull()) {
-                String msg = errorNode.path("message").asText("DeepSeek 返回错误");
-                logger.error("DeepSeek 错误响应: {}", msg);
+                String msg = errorNode.path("message").asText("模型返回错误");
+                logger.error("模型错误响应: {}", msg);
                 throw new RuntimeException(msg);
             }
 
@@ -204,16 +227,27 @@ public class DeepSeekClient {
                     .asText("");
 
             if (content.isEmpty()) {
-                logger.error("DeepSeek 响应中没有 content 字段，原始响应: {}", response);
-                throw new RuntimeException("DeepSeek 响应中没有 content 字段");
+                logger.error("响应中没有 content 字段，原始响应: {}", response);
+                throw new RuntimeException("响应中没有 content 字段");
             }
 
             return content;
         } catch (Exception e) {
-            logger.error("解析 DeepSeek 完整响应失败", e);
-            throw new RuntimeException("解析 DeepSeek 响应失败", e);
+            logger.error("解析模型完整响应失败", e);
+            throw new RuntimeException("解析模型响应失败", e);
         }
     }
 
+    @Data
+    private static class ModelInfo {
+        String url;
+        String apiKey;
+        String model;
+        ModelInfo(String url, String apiKey, String model) {
+            this.url = url;
+            this.apiKey = apiKey;
+            this.model = model;
+        }
+    }
 
 }

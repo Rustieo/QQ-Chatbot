@@ -3,7 +3,7 @@ package rustie.qqchat.service;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.springframework.stereotype.Service;
-import rustie.qqchat.client.DeepSeekClient;
+import rustie.qqchat.client.LLMClient;
 import rustie.qqchat.entity.ChatTextSearchResult;
 
 
@@ -17,20 +17,20 @@ import java.util.concurrent.ConcurrentMap;
 public class ChatService {
     private final int HISTORY_CAPACITY=100;
     List<Map<String, String>> history;
-    private final DeepSeekClient deepSeekClient;
+    private final LLMClient llmClient;
     private final HybridSearchService searchService;
     private final ObjectMapper objectMapper;
     //private final ConcurrentMap<Long, String> groupSystemPrompts = new ConcurrentHashMap<>();
 
-    public ChatService(DeepSeekClient deepSeekClient,HybridSearchService searchService,ObjectMapper objectMapper) {
-        this.deepSeekClient = deepSeekClient;
+    public ChatService(LLMClient llmClient,HybridSearchService searchService,ObjectMapper objectMapper) {
+        this.llmClient = llmClient;
         this.objectMapper = objectMapper;
         this.searchService = searchService;
         this.history = new ArrayList<>(HISTORY_CAPACITY);
     }
     public  String normalChat(String userMessage) {
-        // 调用 DeepSeekClient 获取回复
-        String response = deepSeekClient.normalResponse(userMessage, "", history);
+        // 调用 LLMClient 获取回复
+        String response = llmClient.normalResponse(userMessage, "", history);
         updateConversationHistory(userMessage, response);
         return response;
     }
@@ -41,8 +41,8 @@ public class ChatService {
         List<ChatTextSearchResult> searchResults = searchService.search(userMessage, topK);
         //构建上下文
         String context = buildContext(searchResults);
-        // 调用 DeepSeekClient 获取回复
-        String response = deepSeekClient.normalResponse(userMessage, context, history);
+        // 调用 LLMClient 获取回复
+        String response = llmClient.normalResponse(userMessage, context, history);
         updateConversationHistory(userMessage, response);
         return response;
     }
@@ -68,7 +68,7 @@ public class ChatService {
             explain.append("未检索到相关上下文,将直接根据已有对话历史回答。\n\n");
         }
         String context = buildContext(fused);
-        String answer = deepSeekClient.normalResponse(userMessage, context, history);
+        String answer = llmClient.normalResponse(userMessage, context, history);
         updateConversationHistory(userMessage, answer);
         explain.append("=== 模型回答 ===\n");
         explain.append(answer);
@@ -98,7 +98,7 @@ public class ChatService {
     }
     private String buildContext(List<ChatTextSearchResult> searchResults) {
         if (searchResults == null || searchResults.isEmpty()) {
-            // 返回空字符串，让 DeepSeekClient 按"无检索结果"逻辑处理
+            // 返回空字符串，让 LLMClient 按"无检索结果"逻辑处理
             return "";
         }
         final int MAX_SNIPPET_LEN = 300; // 单段最长字符数，超出截断

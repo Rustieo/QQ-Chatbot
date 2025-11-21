@@ -9,7 +9,8 @@ import com.mikuac.shiro.dto.event.message.GroupMessageEvent;
 import com.mikuac.shiro.enums.AtEnum;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
-import rustie.qqchat.client.DeepSeekClient;
+
+import rustie.qqchat.client.LLMClient;
 import rustie.qqchat.config.AiProperties;
 import rustie.qqchat.service.ChatService;
 import rustie.qqchat.utils.ChatUtils;
@@ -20,12 +21,12 @@ import rustie.qqchat.utils.ChatUtils;
 public class GroupChatPlugin {
 
     private final ChatService chatService;
-    private final DeepSeekClient deepSeekClient;
+    private final LLMClient llmClient;
     private final AiProperties aiProperties;
 
-    public GroupChatPlugin(ChatService chatService, DeepSeekClient deepSeekClient, AiProperties aiProperties) {
+    public GroupChatPlugin(ChatService chatService, LLMClient llmClient, AiProperties aiProperties) {
         this.chatService = chatService;
-        this.deepSeekClient = deepSeekClient;
+        this.llmClient = llmClient;
         this.aiProperties = aiProperties;
     }
     // 更多用法详见 @MessageHandlerFilter 注解源码
@@ -77,7 +78,7 @@ public class GroupChatPlugin {
             String prompt = chatService.normalChat(instruction);
             String trimmedPrompt = prompt.trim();
             aiProperties.getPrompt().setRoles(trimmedPrompt);
-            deepSeekClient.setSystemRole(trimmedPrompt);
+            llmClient.setSystemRole(trimmedPrompt);
             chatService.clearHistory();
             bot.sendGroupMsg(event.getGroupId(), "已根据描述更新系统角色", false);
         } catch (Exception ex) {

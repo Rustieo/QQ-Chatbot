@@ -9,6 +9,8 @@ import com.mikuac.shiro.dto.event.message.AnyMessageEvent;
 import com.mikuac.shiro.dto.event.message.GroupMessageEvent;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
+import rustie.qqchat.client.ModelType;
+import rustie.qqchat.client.LLMClient;
 import rustie.qqchat.service.ChatService;
 import rustie.qqchat.service.SettingService;
 
@@ -19,9 +21,11 @@ public class SettingPlugin {
 
     private final SettingService settingService;
     private final ChatService chatService;
-    public SettingPlugin(SettingService settingService, ChatService chatService) {
+    private final LLMClient llmClient;
+    public SettingPlugin(SettingService settingService, ChatService chatService, LLMClient llmClient) {
         this.settingService = settingService;
         this.chatService = chatService;
+        this.llmClient = llmClient;
     }
 
     @GroupMessageHandler
@@ -84,6 +88,30 @@ public class SettingPlugin {
     public void clearLimit(Bot bot, GroupMessageEvent event) {
         SettingService.CommandResult result = settingService.clearLimits();
         bot.sendGroupMsg(event.getGroupId(), result.message(), false);
+    }
+
+    // ===== 新增: 模型切换 =====
+    @GroupMessageHandler
+    @MessageHandlerFilter(cmd = "^/set/ai/model.*")
+    public void switchModel(Bot bot, GroupMessageEvent event) {
+        SettingService.CommandResult result = settingService.switchModel(event.getMessage(), llmClient);
+        bot.sendGroupMsg(event.getGroupId(), result.message(), false);
+    }
+
+    @GroupMessageHandler
+    @MessageHandlerFilter(cmd = "^/set/ai/model/deepseek$")
+    public void switchToDeepSeek(Bot bot, GroupMessageEvent event) {
+        boolean ok = llmClient.switchModel(ModelType.DeepSeek);
+        String msg = ok ? "已切换到 DeepSeek" : "切换 DeepSeek 失败";
+        bot.sendGroupMsg(event.getGroupId(), msg, false);
+    }
+
+    @GroupMessageHandler
+    @MessageHandlerFilter(cmd = "^/set/ai/model/qwen$")
+    public void switchToQwen(Bot bot, GroupMessageEvent event) {
+        boolean ok = llmClient.switchModel(ModelType.Qwen);
+        String msg = ok ? "已切换到 Qwen" : "切换 Qwen 失败";
+        bot.sendGroupMsg(event.getGroupId(), msg, false);
     }
 
     @AnyMessageHandler
