@@ -4,14 +4,22 @@ import org.springframework.stereotype.Service;
 import rustie.qqchat.config.AiProperties;
 import rustie.qqchat.service.ChatService;
 
+import java.util.ArrayList;
+import java.util.List;
 import java.util.regex.Pattern;
 
 @Service
 public class SettingService {
 
-    public static final String SYSPROMPT_COMMAND = "/setting/ds/sysprompt";
-    public static final String TOP_P_COMMAND = "/setting/ds/topp";
-    public static final String TEMPERATURE_COMMAND = "/setting/ds/temperature";
+    public static final String SYSPROMPT_COMMAND = "/set/ai/sysprompt";
+    public static final String TOP_P_COMMAND = "/set/ai/topp";
+    public static final String TEMPERATURE_COMMAND = "/set/ai/temperature";
+    public static final String LIMIT_COMMAND = "/set/ai/limit"; // 保留兼容（整体替换占位）
+    // 新增: 行为规则管理子命令
+    public static final String LIMIT_ADD_COMMAND = "/set/ai/limit/add";
+    public static final String LIMIT_DEL_COMMAND = "/set/ai/limit/del";
+    public static final String LIMIT_LIST_COMMAND = "/set/ai/limit/list";
+    public static final String LIMIT_CLEAR_COMMAND = "/set/ai/limit/clear";
 
     private final AiProperties aiProperties;
     private final ChatService chatService;
@@ -26,7 +34,7 @@ public class SettingService {
         if (systemRole.isEmpty()) {
             return CommandResult.failure("请在命令后附上系统角色内容");
         }
-        aiProperties.getPrompt().setRules(systemRole);
+        aiProperties.getPrompt().setRoles(systemRole);
         chatService.clearHistory();
         return CommandResult.success("系统角色已更新");
     }
@@ -67,6 +75,87 @@ public class SettingService {
         }
     }
 
+    // ================= 行为规则（limits）管理 =================
+    public CommandResult addLimit(String rawMessage) {
+        String payload = extractPayload(rawMessage, LIMIT_ADD_COMMAND);
+        if (payload.isEmpty()) {
+            return CommandResult.failure("请在命令后提供要添加的行为规则文本");
+        }
+        List<String> limits = getOrInitLimits();
+        // 去重：如果已存在，给出提示，不重复添加
+        for (int i = 0; i < limits.size(); i++) {
+            if (limits.get(i).equals(payload)) {
+                return CommandResult.failure("该规则已存在，序号为 " + (i + 1));
+            }
+        }
+        limits.add(payload);
+        chatService.clearHistory();
+        return CommandResult.success("已添加行为规则，当前共 " + limits.size() + " 条");
+    }
+
+    public CommandResult deleteLimit(String rawMessage) {
+        String payload = extractPayload(rawMessage, LIMIT_DEL_COMMAND);
+        if (payload.isEmpty()) {
+            return CommandResult.failure("请提供要删除的规则序号或完整文本");
+        }
+        List<String> limits = getOrInitLimits();
+        if (limits.isEmpty()) {
+            return CommandResult.failure("当前没有任何规则可删除");
+        }
+        // 尝试按序号删除
+        try {
+            int idx = Integer.parseInt(payload.trim());
+            if (idx < 1 || idx > limits.size()) {
+                return CommandResult.failure("序号超出范围，当前规则数量为 " + limits.size());
+            }
+            String removed = limits.remove(idx - 1);
+            chatService.clearHistory();
+            return CommandResult.success("已按序号删除: " + removed);
+        } catch (NumberFormatException ignore) {
+            // 不是数字，则按内容匹配删除第一条
+        }
+        for (int i = 0; i < limits.size(); i++) {
+            if (limits.get(i).equals(payload)) {
+                limits.remove(i);
+                chatService.clearHistory();
+                return CommandResult.success("已按文本删除，剩余 " + limits.size() + " 条");
+            }
+        }
+        return CommandResult.failure("未找到匹配的规则（序号或文本）");
+    }
+
+    public CommandResult listLimits() {
+        List<String> limits = aiProperties.getPrompt().getLimits();
+        if (limits == null || limits.isEmpty()) {
+            return CommandResult.success("当前无行为规则");
+        }
+        StringBuilder sb = new StringBuilder();
+        sb.append("当前行为规则共 ").append(limits.size()).append(" 条:\n");
+        for (int i = 0; i < limits.size(); i++) {
+            sb.append(i + 1).append(". ").append(limits.get(i)).append("\n");
+        }
+        return CommandResult.success(sb.toString());
+    }
+
+    public CommandResult clearLimits() {
+        List<String> limits = aiProperties.getPrompt().getLimits();
+        if (limits == null || limits.isEmpty()) {
+            return CommandResult.failure("当前没有规则可清空");
+        }
+        limits.clear();
+        chatService.clearHistory();
+        return CommandResult.success("已清空所有行为规则");
+    }
+
+    private List<String> getOrInitLimits() {
+        List<String> limits = aiProperties.getPrompt().getLimits();
+        if (limits == null) {
+            limits = new ArrayList<>();
+            aiProperties.getPrompt().setLimits(limits);
+        }
+        return limits;
+    }
+
     public String buildHelpMessage() {
         StringBuilder sb = new StringBuilder();
         sb.append("【基础对话】\n");
@@ -85,6 +174,15 @@ public class SettingService {
         sb.append("示例：").append(SYSPROMPT_COMMAND).append(" 你是一个火鸡面。\n\n");
         sb.append("[群] ").append(TOP_P_COMMAND).append(" 0-1  设置 top_p。\n\n");
         sb.append("[群] ").append(TEMPERATURE_COMMAND).append(" 0-2  设置 temperature。\n");
+        sb.append("------\n");
+        sb.append("【行为规则管理】\n");
+        sb.append("用于限制 AI 的回答风格/安全/语气等，可叠加多条。\n");
+        sb.append("[群] ").append(LIMIT_ADD_COMMAND).append(" 规则文本  添加一条行为规则。\n\n");
+        sb.append("[群] ").append(LIMIT_DEL_COMMAND).append(" 序号|完整文本  删除一条行为规则。\n\n");
+        sb.append("示例：").append(LIMIT_DEL_COMMAND).append(" 2  (按序号删除第2条)\n\n");
+        sb.append("示例：").append(LIMIT_DEL_COMMAND).append(" 不要泄露用户个人信息。 (按文本删除)\n\n");
+        sb.append("[群] ").append(LIMIT_LIST_COMMAND).append("  查看当前全部规则。\n\n");
+        sb.append("[群] ").append(LIMIT_CLEAR_COMMAND).append("  清空全部行为规则。\n\n");
         sb.append("------\n");
         sb.append("【知识库管理（RAG）】\n");
         sb.append("[群] /rag/add/common 文本  将文本加入知识库（不带昵称等元信息）。\n\n");

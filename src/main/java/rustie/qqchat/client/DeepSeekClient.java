@@ -16,7 +16,6 @@ import org.springframework.web.reactive.function.client.WebClient;
 import rustie.qqchat.config.AiProperties;
 
 import java.util.ArrayList;
-import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -109,47 +108,76 @@ public class DeepSeekClient {
                                                     String context,
                                                     List<Map<String, String>> history) {
         List<Map<String, String>> messages = new ArrayList<>();
-
         AiProperties.Prompt promptCfg = aiProperties.getPrompt();
+        // =================================================================
+        // 1. System 区域：仅保留 "人设" 和 "核心规则" (Role + Limitations)
+        // =================================================================
+        StringBuilder systemBuilder = new StringBuilder();
+        String roles = promptCfg.getRoles();
 
-        // 1. 构建统一的 system 指令（规则 + 参考信息）
-        StringBuilder sysBuilder = new StringBuilder();
-        String rules=promptCfg.getRules();
-        if (rules != null) {
-            sysBuilder.append(rules).append("\n\n");
-        }
-
-        String refStart = promptCfg.getRefStart() != null ? promptCfg.getRefStart() : "<<REF>>";
-        String refEnd = promptCfg.getRefEnd() != null ? promptCfg.getRefEnd() : "<<END>>";
-        sysBuilder.append(refStart).append("\n");
-
-        if (context != null && !context.isEmpty()) {
-            sysBuilder.append(context);
+        // 默认兜底的人设，防止 rules 为空时由模型只有空 system
+        if (roles != null && !roles.isBlank()) {
+            systemBuilder.append(roles);
         } else {
-            String noResult = promptCfg.getNoResultText() != null ? promptCfg.getNoResultText() : "（本轮无检索结果）";
-            sysBuilder.append(noResult).append("\n");
+            systemBuilder.append("你是一个专业的AI助手。请基于用户提供的上下文回答问题。");
         }
 
-        sysBuilder.append(refEnd);
+        ////聊天规则
+        List<String> limits=promptCfg.getLimits();
+        if (limits != null&&!limits.isEmpty()) {
+            systemBuilder.append("\n\n【行为准则】\n");
+            for (int i = 0; i < limits.size(); i++) {
+                int idx=i+1;
+                systemBuilder.append(idx).append(". ").append(limits.get(i)).append("\n");
+            }
 
-        String systemContent = sysBuilder.toString();
+        }
+
         messages.add(Map.of(
                 "role", "system",
-                "content", systemContent
+                "content", systemBuilder.toString()
         ));
-        logger.debug("添加了系统消息，长度: {}", systemContent.length());
 
-        // 2. 追加历史消息（若有）
+        // =================================================================
+        // 2. History 区域：历史对话 (History)
+        // =================================================================
+        // 放在中间，让模型知道之前的语境，但不会混淆当前的 RAG 资料
         if (history != null && !history.isEmpty()) {
             messages.addAll(history);
         }
 
-        // 3. 当前用户问题
+        // =================================================================
+        // 3. User 区域：RAG 上下文 + 当前问题 (Context + Question)
+        // =================================================================
+        // 构建复合型的用户 prompt，利用近因效应，让模型最关注这里的资料
+        StringBuilder userContentBuilder = new StringBuilder();
+
+        // A. 注入 RAG 知识 (如果有)
+        if (context != null && !context.isBlank()) {
+            userContentBuilder.append("请参考以下 <context> 标签内的信息来回答我的问题：\n\n");
+            userContentBuilder.append("<context>\n");
+            userContentBuilder.append(context).append("\n");
+            userContentBuilder.append("</context>\n\n");
+            // 可以在这里加一句强化提示，防止模型产生幻觉
+            userContentBuilder.append("（如果参考信息中没有答案，请直接说明，不要编造。）\n\n");
+        } else {
+            // 如果没有 RAG 命中，可以给一个 fallback 提示
+            userContentBuilder.append("（暂无参考资料，请根据你的通用知识回答）\n\n");
+        }
+        // B. 注入当前用户问题
+        userContentBuilder.append("我的问题是：").append(userMessage);
+
+
         messages.add(Map.of(
                 "role", "user",
-                "content", userMessage
+                "content", userContentBuilder.toString()
         ));
+        logger.debug("构建消息完成: System规则长度={}, History条数={}, 最终User内容长度={}",
+                systemBuilder.length(),
+                (history != null ? history.size() : 0),
+                userContentBuilder.length());
 
+        log.debug("\n\n构建消息完成: {}", messages);
         return messages;
     }
 

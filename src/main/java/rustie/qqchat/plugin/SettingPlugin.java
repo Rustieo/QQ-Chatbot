@@ -57,6 +57,35 @@ public class SettingPlugin {
         bot.sendGroupMsg(event.getGroupId(), "嗯啊,忘了", false);
     }
 
+    // ===== 新增: 行为规则管理 =====
+    @GroupMessageHandler
+    @MessageHandlerFilter(cmd = "^/set/ai/limit/add.*")
+    public void addLimit(Bot bot, GroupMessageEvent event) {
+        SettingService.CommandResult result = settingService.addLimit(event.getMessage());
+        bot.sendGroupMsg(event.getGroupId(), result.message(), false);
+    }
+
+    @GroupMessageHandler
+    @MessageHandlerFilter(cmd = "^/set/ai/limit/del.*")
+    public void delLimit(Bot bot, GroupMessageEvent event) {
+        SettingService.CommandResult result = settingService.deleteLimit(event.getMessage());
+        bot.sendGroupMsg(event.getGroupId(), result.message(), false);
+    }
+
+    @GroupMessageHandler
+    @MessageHandlerFilter(cmd = "^/set/ai/limit/list$")
+    public void listLimit(Bot bot, GroupMessageEvent event) {
+        SettingService.CommandResult result = settingService.listLimits();
+        bot.sendGroupMsg(event.getGroupId(), result.message(), false);
+    }
+
+    @GroupMessageHandler
+    @MessageHandlerFilter(cmd = "^/set/ai/limit/clear$")
+    public void clearLimit(Bot bot, GroupMessageEvent event) {
+        SettingService.CommandResult result = settingService.clearLimits();
+        bot.sendGroupMsg(event.getGroupId(), result.message(), false);
+    }
+
     @AnyMessageHandler
     @MessageHandlerFilter(cmd="^/help$")
     public void showHelp(Bot bot, AnyMessageEvent event) {

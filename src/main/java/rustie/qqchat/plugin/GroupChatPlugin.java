@@ -1,22 +1,18 @@
 package rustie.qqchat.plugin;
 
-import com.mikuac.shiro.annotation.AnyMessageHandler;
 import com.mikuac.shiro.annotation.GroupMessageHandler;
 import com.mikuac.shiro.annotation.MessageHandlerFilter;
-import com.mikuac.shiro.annotation.PrivateMessageHandler;
 import com.mikuac.shiro.annotation.common.Shiro;
 import com.mikuac.shiro.common.utils.MsgUtils;
 import com.mikuac.shiro.core.Bot;
-import com.mikuac.shiro.dto.event.message.AnyMessageEvent;
 import com.mikuac.shiro.dto.event.message.GroupMessageEvent;
-import com.mikuac.shiro.dto.event.message.PrivateMessageEvent;
+import com.mikuac.shiro.enums.AtEnum;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
 import rustie.qqchat.client.DeepSeekClient;
 import rustie.qqchat.config.AiProperties;
 import rustie.qqchat.service.ChatService;
-
-import java.util.regex.Matcher;
+import rustie.qqchat.utils.ChatUtils;
 
 @Shiro
 @Component
@@ -34,13 +30,13 @@ public class GroupChatPlugin {
     }
     // 更多用法详见 @MessageHandlerFilter 注解源码
 
-
     @GroupMessageHandler
-    @MessageHandlerFilter(startWith = "/chat")
+    @MessageHandlerFilter(at = AtEnum.NEED)
     public void normalChat(Bot bot, GroupMessageEvent event) {
-        String rawMessage = event.getMessage();
-        String message=rawMessage.replaceAll("\\s+", " ").trim();
-        String response = chatService.normalChat(message);
+        String rawMessage= ChatUtils.getEventPlainText(event);
+        if(rawMessage.startsWith("/"))return;
+        String text=rawMessage.replaceAll("\\s+", " ").trim();
+        String response = chatService.normalChat(text);
         String sendMsg = MsgUtils.builder().text(response).build();
         bot.sendGroupMsg(event.getGroupId(), sendMsg, false);
     }
@@ -80,7 +76,7 @@ public class GroupChatPlugin {
         try {
             String prompt = chatService.normalChat(instruction);
             String trimmedPrompt = prompt.trim();
-            aiProperties.getPrompt().setRules(trimmedPrompt);
+            aiProperties.getPrompt().setRoles(trimmedPrompt);
             deepSeekClient.setSystemRole(trimmedPrompt);
             chatService.clearHistory();
             bot.sendGroupMsg(event.getGroupId(), "已根据描述更新系统角色", false);
@@ -89,6 +85,4 @@ public class GroupChatPlugin {
             bot.sendGroupMsg(event.getGroupId(), "生成系统提示词失败,请稍后再试", false);
         }
     }
-
-
 }

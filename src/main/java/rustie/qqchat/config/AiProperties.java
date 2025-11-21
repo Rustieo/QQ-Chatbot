@@ -5,6 +5,8 @@ import lombok.Data;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 import org.springframework.stereotype.Component;
 
+import java.util.List;
+
 /**
  * 全局 AI 相关配置，包含 Prompt 模板和生成参数。
  */
@@ -18,12 +20,10 @@ public class AiProperties {
 
     @Data
     public static class Prompt {
-        /** 规则文案 */
-        private String rules;
-        /** 引用开始分隔符 */
-        private String refStart;
-        /** 引用结束分隔符 */
-        private String refEnd;
+        /** 角色设定 */
+        private String roles;
+        //限制规则
+        private List<String> limits;
         /** 无检索结果时的占位文案 */
         private String noResultText;
     }
