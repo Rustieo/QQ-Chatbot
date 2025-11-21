@@ -31,3 +31,7 @@ build/
 
 ### VS Code ###
 .vscode/
+/napcat/
+/.env
+
+/src/main/resources/application.yml

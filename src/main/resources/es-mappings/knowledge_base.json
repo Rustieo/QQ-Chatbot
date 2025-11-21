@@ -1,0 +1,46 @@
+{
+  "settings": {
+    "number_of_shards": 1,
+    "number_of_replicas": 0
+  },
+  "mappings": {
+    "dynamic": true,
+    "properties": {
+      "id": {
+        "type": "keyword"
+      },
+      "content": {
+        "type": "text",
+        "fields": {
+          "raw": {
+            "type": "keyword",
+            "ignore_above": 256
+          }
+        }
+      },
+      "vector": {
+        "type": "dense_vector",
+        "dims": 2048,
+        "index": true,
+        "similarity": "cosine"
+      },
+      "userId": {
+        "type": "keyword"
+      },
+      "userName": {
+        "type": "keyword"
+      },
+      "groupId": {
+        "type": "keyword"
+      },
+      "scope": {
+        "type": "keyword"
+      },
+      "createTime": {
+        "type": "date",
+        "format": "epoch_millis"
+      }
+    }
+  }
+}
+

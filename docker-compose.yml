@@ -1,0 +1,61 @@
+services:
+  elasticsearch:
+    image: docker.elastic.co/elasticsearch/elasticsearch:8.10.2
+    container_name: es-qqchat
+    environment:
+      - discovery.type=single-node
+      - xpack.security.enabled=true
+      - xpack.security.http.ssl.enabled=false
+      - ELASTIC_PASSWORD=${ES_PASSWORD}
+      - ES_JAVA_OPTS=-Xms1g -Xmx1g
+    ports:
+      - "9200:9200"
+    volumes:
+      - es-data:/usr/share/elasticsearch/data
+    # 1. 【新增】添加健康检查：每 5 秒检查一次 ES 是否活着
+    healthcheck:
+      test: ["CMD-SHELL", "curl -s http://localhost:9200 >/dev/null || exit 1"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+  napcat:
+    image: mlikiowa/napcat-docker:latest
+    container_name: napcat
+    restart: always
+    ports:
+      - "6099:6099" # NapCat 的 Web 管理面板端口
+    environment:
+      - NAPCAT_UID=0   # 设为 0 (root) 以避免 Windows 下的权限问题
+      - NAPCAT_GID=0
+    volumes:
+      - ./napcat/config:/app/napcat/config  # 【关键】配置文件路径
+      - ./napcat/qq:/app/.config/QQ         # 【关键】保存 QQ 登录凭证
+    depends_on:
+      - backend # 也可以不依赖，两者相对独立，通常是 NapCat 连 Backend
+  backend:
+    image: qq-chatbot:latest
+    container_name: qq-chatbot
+    depends_on:
+      elasticsearch:
+        # 2. 【修改】不仅仅是依赖，而是等待 ES 变成 "healthy" 状态才启动
+        condition: service_healthy
+    environment:
+      - SPRING_PROFILES_ACTIVE=docker
+      - ELASTICSEARCH_HOST=elasticsearch
+      - ELASTICSEARCH_PORT=9200
+      - ELASTICSEARCH_SCHEME=http
+      - ELASTICSEARCH_USERNAME=elastic
+      - ELASTICSEARCH_PASSWORD=${ES_PASSWORD}
+      - DEEPSEEK_API_URL=https://api.deepseek.com/v1
+      - DEEPSEEK_API_KEY=${DEEPSEEK_KEY}
+      - DEEPSEEK_MODEL=deepseek-chat
+      - EMBEDDING_API_URL=https://dashscope.aliyuncs.com/compatible-mode/v1
+      - EMBEDDING_API_KEY=${ALIYUN_KEY}
+      - EMBEDDING_MODEL=text-embedding-v4
+      - EMBEDDING_DIMENSION=2048
+    ports:
+      - "8080:8080"
+    restart: unless-stopped
+
+volumes:
+  es-data:

@@ -1,0 +1,39 @@
+server:
+  port: 8080
+shiro:
+  ws:
+    server:
+      enable: true
+      url: "/qqbot"
+ai:
+  prompt:
+    rules: |
+      你是一个喜欢跟人聊天的AI助手
+    ref-start: "<<REF>>"
+    ref-end: "<<END>>"
+    no-result-text: "（本轮无检索结果）"
+  generation:
+    temperature: 0.9
+    max-tokens: 6000
+    top-p: 0.9
+deepseek:
+  api:
+    url: https://api.deepseek.com/v1  # 本地是 http://localhost:11434/v1 官方：https://api.deepseek.com/v1
+    model: deepseek-chat  # 本地: deepseek-r1:7b, 官方: deepseek-chat
+    key:  put your key here
+
+embedding:
+  api:
+    url: https://dashscope.aliyuncs.com/compatible-mode/v1
+    key:   put your key here
+    model: text-embedding-v4
+    batch-size: 10  # 单次请求最大行数（DashScope限制为10）
+    dimension: 2048  # 指定向量维度
+
+elasticsearch:
+  # 意思是：优先读取环境变量 ELASTICSEARCH_HOST，读不到就默认用 localhost
+  host: ${ELASTICSEARCH_HOST:localhost}
+  port: ${ELASTICSEARCH_PORT:9200}
+  scheme: ${ELASTICSEARCH_SCHEME:http}
+  username: ${ELASTICSEARCH_USERNAME:elastic}
+  password: ${ELASTICSEARCH_PASSWORD:admin}
