@@ -35,7 +35,7 @@ public class PrivateChatPlugin {
         log.info(t+"--------------------");
         if(rawMessage.startsWith("/"))return;
         String message=rawMessage.replaceAll("\\s+", " ").trim();
-        String response = chatService.normalChat(message);
+        String response = chatService.normalChatPrivate(event.getUserId(), message);
         String sendMsg = MsgUtils.builder().text(response).build();
         bot.sendPrivateMsg(event.getUserId(), sendMsg, false);
     }
@@ -43,7 +43,7 @@ public class PrivateChatPlugin {
     @MessageHandlerFilter(cmd = "^/rq.*")
     public void callDeepSeekRag(Bot bot, PrivateMessageEvent event) {
         String message=event.getMessage().replaceAll("\\s+", " ").trim();
-        String response = chatService.ragChat(message);
+        String response = chatService.ragChatPrivate(event.getUserId(), message);
         String sendMsg = MsgUtils.builder().text(response).build();
         bot.sendPrivateMsg(event.getUserId(), sendMsg, false);
     }

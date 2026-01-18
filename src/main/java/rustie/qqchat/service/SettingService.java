@@ -25,11 +25,9 @@ public class SettingService {
     public static final String MODEL_SWITCH_COMMAND = "/set/ai/model";
 
     private final AiProperties aiProperties;
-    private final ChatService chatService;
 
-    public SettingService(AiProperties aiProperties, ChatService chatService) {
+    public SettingService(AiProperties aiProperties) {
         this.aiProperties = aiProperties;
-        this.chatService = chatService;
     }
 
     public CommandResult updateSystemPrompt(String rawMessage) {
@@ -38,7 +36,6 @@ public class SettingService {
             return CommandResult.failure("请在命令后附上系统角色内容");
         }
         aiProperties.getPrompt().setRoles(systemRole);
-        chatService.clearHistory();
         return CommandResult.success("系统角色已更新");
     }
 
@@ -53,7 +50,6 @@ public class SettingService {
                 return CommandResult.failure("top_p 必须在 0 到 1 之间");
             }
             aiProperties.getGeneration().setTopP(value);
-            chatService.clearHistory();
             return CommandResult.success(String.format("top_p 已更新为 %.2f", value));
         } catch (NumberFormatException ex) {
             return CommandResult.failure("无法解析 top_p，请输入合法的小数");
@@ -71,7 +67,6 @@ public class SettingService {
                 return CommandResult.failure("temperature 必须在 0 到 2 之间");
             }
             aiProperties.getGeneration().setTemperature(value);
-            chatService.clearHistory();
             return CommandResult.success(String.format("Temperature 已更新为 %.2f", value));
         } catch (NumberFormatException ex) {
             return CommandResult.failure("无法解析 temperature，请输入合法的小数");
@@ -92,7 +87,6 @@ public class SettingService {
             }
         }
         limits.add(payload);
-        chatService.clearHistory();
         return CommandResult.success("已添加行为规则，当前共 " + limits.size() + " 条");
     }
 
@@ -112,7 +106,6 @@ public class SettingService {
                 return CommandResult.failure("序号超出范围，当前规则数量为 " + limits.size());
             }
             String removed = limits.remove(idx - 1);
-            chatService.clearHistory();
             return CommandResult.success("已按序号删除: " + removed);
         } catch (NumberFormatException ignore) {
             // 不是数字，则按内容匹配删除第一条
@@ -120,7 +113,6 @@ public class SettingService {
         for (int i = 0; i < limits.size(); i++) {
             if (limits.get(i).equals(payload)) {
                 limits.remove(i);
-                chatService.clearHistory();
                 return CommandResult.success("已按文本删除，剩余 " + limits.size() + " 条");
             }
         }
@@ -146,7 +138,6 @@ public class SettingService {
             return CommandResult.failure("当前没有规则可清空");
         }
         limits.clear();
-        chatService.clearHistory();
         return CommandResult.success("已清空所有行为规则");
     }
 
@@ -179,7 +170,6 @@ public class SettingService {
         if (!ok) {
             return CommandResult.failure("模型切换失败: 未配置 " + type);
         }
-        chatService.clearHistory();
         return CommandResult.success("已切换到模型: " + type);
     }
 

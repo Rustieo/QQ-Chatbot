@@ -32,6 +32,8 @@ public class SettingPlugin {
     @MessageHandlerFilter(cmd = "^/setting/ds/sysprompt.*")
     public void setSystemRole(Bot bot, GroupMessageEvent event) {
         SettingService.CommandResult result = settingService.updateSystemPrompt(event.getMessage());
+        // 系统角色变化会影响上下文，清空当前群会话的历史（DB + 缓存）
+        chatService.clearGroupHistory(event.getGroupId());
         bot.sendGroupMsg(event.getGroupId(), result.message(), false);
     }
 
@@ -39,25 +41,27 @@ public class SettingPlugin {
     @MessageHandlerFilter(cmd = "^/setting/ds/topp.*")
     public void updateTopP(Bot bot, GroupMessageEvent event) {
         SettingService.CommandResult result = settingService.updateTopP(event.getMessage());
+        chatService.clearGroupHistory(event.getGroupId());
         bot.sendGroupMsg(event.getGroupId(), result.message(), false);
     }
     @GroupMessageHandler
     @MessageHandlerFilter(cmd = "^/setting/ds/temperature.*")
     public void updateTemperature(Bot bot, GroupMessageEvent event) {
         SettingService.CommandResult result = settingService.updateTemperature(event.getMessage());
+        chatService.clearGroupHistory(event.getGroupId());
         bot.sendGroupMsg(event.getGroupId(), result.message(), false);
     }
     @GroupMessageHandler
     @MessageHandlerFilter(cmd="^/new$")
     public void newChat(Bot bot, GroupMessageEvent event) {
-        chatService.clearHistory();
+        chatService.clearGroupHistory(event.getGroupId());
         bot.sendGroupMsg(event.getGroupId(), "嗯啊,复活了", false);
         settingService.updateSystemPrompt("你是一个喜欢跟人聊天的AI助手");
     }
     @GroupMessageHandler
     @MessageHandlerFilter(cmd="^/clear$")
     public void clearChat(Bot bot, GroupMessageEvent event) {
-        chatService.clearHistory();
+        chatService.clearGroupHistory(event.getGroupId());
         bot.sendGroupMsg(event.getGroupId(), "嗯啊,忘了", false);
     }
 
@@ -66,6 +70,7 @@ public class SettingPlugin {
     @MessageHandlerFilter(cmd = "^/set/ai/limit/add.*")
     public void addLimit(Bot bot, GroupMessageEvent event) {
         SettingService.CommandResult result = settingService.addLimit(event.getMessage());
+        chatService.clearGroupHistory(event.getGroupId());
         bot.sendGroupMsg(event.getGroupId(), result.message(), false);
     }
 
@@ -73,6 +78,7 @@ public class SettingPlugin {
     @MessageHandlerFilter(cmd = "^/set/ai/limit/del.*")
     public void delLimit(Bot bot, GroupMessageEvent event) {
         SettingService.CommandResult result = settingService.deleteLimit(event.getMessage());
+        chatService.clearGroupHistory(event.getGroupId());
         bot.sendGroupMsg(event.getGroupId(), result.message(), false);
     }
 
@@ -87,6 +93,7 @@ public class SettingPlugin {
     @MessageHandlerFilter(cmd = "^/set/ai/limit/clear$")
     public void clearLimit(Bot bot, GroupMessageEvent event) {
         SettingService.CommandResult result = settingService.clearLimits();
+        chatService.clearGroupHistory(event.getGroupId());
         bot.sendGroupMsg(event.getGroupId(), result.message(), false);
     }
 
@@ -95,6 +102,7 @@ public class SettingPlugin {
     @MessageHandlerFilter(cmd = "^/set/ai/model.*")
     public void switchModel(Bot bot, GroupMessageEvent event) {
         SettingService.CommandResult result = settingService.switchModel(event.getMessage(), llmClient);
+        chatService.clearGroupHistory(event.getGroupId());
         bot.sendGroupMsg(event.getGroupId(), result.message(), false);
     }
 

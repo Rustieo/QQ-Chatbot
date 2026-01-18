@@ -37,7 +37,7 @@ public class GroupChatPlugin {
         String rawMessage= ChatUtils.getEventPlainText(event);
         if(rawMessage.startsWith("/"))return;
         String text=rawMessage.replaceAll("\\s+", " ").trim();
-        String response = chatService.normalChat(text);
+        String response = chatService.normalChatGroup(event.getGroupId(), event.getUserId(), text);
         String sendMsg = MsgUtils.builder().text(response).build();
         bot.sendGroupMsg(event.getGroupId(), sendMsg, false);
     }
@@ -47,7 +47,7 @@ public class GroupChatPlugin {
     @MessageHandlerFilter(cmd = "^/rq.*")
     public void ragChat(Bot bot, GroupMessageEvent event) {
         String message=event.getMessage().replaceAll("\\s+", " ").trim();
-        String response = chatService.ragChat(message);
+        String response = chatService.ragChatGroup(event.getGroupId(), event.getUserId(), message);
         String sendMsg = MsgUtils.builder().text(response).build();
         bot.sendGroupMsg(event.getGroupId(), sendMsg, false);
     }
@@ -55,7 +55,7 @@ public class GroupChatPlugin {
     @MessageHandlerFilter(cmd = "^/rq/ex.*")
     public void explainRagChat(Bot bot, GroupMessageEvent event) {
         String message=event.getMessage().replaceAll("\\s+", " ").trim();
-        String response = chatService.ragChatExplain(message);
+        String response = chatService.ragChatExplainGroup(event.getGroupId(), event.getUserId(), message);
         String sendMsg = MsgUtils.builder().text(response).build();
         bot.sendGroupMsg(event.getGroupId(), sendMsg, false);
     }
@@ -73,13 +73,14 @@ public class GroupChatPlugin {
                 "1. 用中文。\n" +
                 "2. 直接给出最终系统提示词内容,不要包含解释或列表。\n" +
                 "角色描述:" + description;
-        chatService.clearHistory();
+        chatService.clearGroupHistory(event.getGroupId());
         try {
-            String prompt = chatService.normalChat(instruction);
+            // 生成系统提示词不应污染群聊历史，因此直接调用底层模型，不记录历史
+            String prompt = llmClient.normalResponse(instruction, "", null);
             String trimmedPrompt = prompt.trim();
             aiProperties.getPrompt().setRoles(trimmedPrompt);
             llmClient.setSystemRole(trimmedPrompt);
-            chatService.clearHistory();
+            chatService.clearGroupHistory(event.getGroupId());
             bot.sendGroupMsg(event.getGroupId(), "已根据描述更新系统角色", false);
         } catch (Exception ex) {
             log.error("调用 DeepSeek 生成系统提示词失败", ex);

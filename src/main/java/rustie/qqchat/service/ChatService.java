@@ -1,53 +1,70 @@
 package rustie.qqchat.service;
 
-import com.fasterxml.jackson.core.JsonProcessingException;
-import com.fasterxml.jackson.databind.ObjectMapper;
 import org.springframework.stereotype.Service;
 import rustie.qqchat.client.LLMClient;
 import rustie.qqchat.entity.ChatTextSearchResult;
+import tools.jackson.databind.ObjectMapper;
 
 
-import java.util.ArrayList;
-import java.util.HashMap;
 import java.util.List;
-import java.util.Map;
-import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.ConcurrentMap;
 @Service
 public class ChatService {
-    private final int HISTORY_CAPACITY=100;
-    List<Map<String, String>> history;
     private final LLMClient llmClient;
     private final HybridSearchService searchService;
     private final ObjectMapper objectMapper;
-    //private final ConcurrentMap<Long, String> groupSystemPrompts = new ConcurrentHashMap<>();
+    private final MessageHistoryService messageHistoryService;
 
-    public ChatService(LLMClient llmClient,HybridSearchService searchService,ObjectMapper objectMapper) {
+    public ChatService(LLMClient llmClient,
+                       HybridSearchService searchService,
+                       ObjectMapper objectMapper,
+                       MessageHistoryService messageHistoryService) {
         this.llmClient = llmClient;
         this.objectMapper = objectMapper;
         this.searchService = searchService;
-        this.history = new ArrayList<>(HISTORY_CAPACITY);
+        this.messageHistoryService = messageHistoryService;
     }
-    public  String normalChat(String userMessage) {
-        // 调用 LLMClient 获取回复
+
+    public String normalChatPrivate(long userId, String userMessage) {
+        List<java.util.Map<String, String>> history = messageHistoryService.getPrivateHistory(userId);
         String response = llmClient.normalResponse(userMessage, "", history);
-        updateConversationHistory(userMessage, response);
+        messageHistoryService.savePrivateTurn(userId, userMessage, response);
         return response;
     }
-    public  String ragChat(String userMessage) {
-        return ragChat(userMessage, 5);
+
+    public String normalChatGroup(long groupId, long groupMemberId, String userMessage) {
+        List<java.util.Map<String, String>> history = messageHistoryService.getGroupHistory(groupId);
+        String response = llmClient.normalResponse(userMessage, "", history);
+        messageHistoryService.saveGroupTurn(groupId, groupMemberId, userMessage, response);
+        return response;
     }
-    public  String ragChat(String userMessage,int topK) {
+
+    public String ragChatPrivate(long userId, String userMessage) {
+        return ragChatPrivate(userId, userMessage, 5);
+    }
+
+    public String ragChatPrivate(long userId, String userMessage, int topK) {
         List<ChatTextSearchResult> searchResults = searchService.search(userMessage, topK);
-        //构建上下文
         String context = buildContext(searchResults);
-        // 调用 LLMClient 获取回复
+        List<java.util.Map<String, String>> history = messageHistoryService.getPrivateHistory(userId);
         String response = llmClient.normalResponse(userMessage, context, history);
-        updateConversationHistory(userMessage, response);
+        messageHistoryService.savePrivateTurn(userId, userMessage, response);
+        return response;
+    }
+
+    public String ragChatGroup(long groupId, long groupMemberId, String userMessage) {
+        return ragChatGroup(groupId, groupMemberId, userMessage, 5);
+    }
+
+    public String ragChatGroup(long groupId, long groupMemberId, String userMessage, int topK) {
+        List<ChatTextSearchResult> searchResults = searchService.search(userMessage, topK);
+        String context = buildContext(searchResults);
+        List<java.util.Map<String, String>> history = messageHistoryService.getGroupHistory(groupId);
+        String response = llmClient.normalResponse(userMessage, context, history);
+        messageHistoryService.saveGroupTurn(groupId, groupMemberId, userMessage, response);
         return response;
     }
     // 新增: 带解释的 RAG 聊天。返回检索过程信息 + 最终回答。
-    public String ragChatExplain(String userMessage) {
+    public String ragChatExplainGroup(long groupId, long groupMemberId, String userMessage) {
         final int topK = 5; // 与默认 ragChat 保持一致
         HybridSearchService.SearchDetail detail = searchService.searchDetail(userMessage, topK);
         List<ChatTextSearchResult> fused = detail.fused;
@@ -68,8 +85,9 @@ public class ChatService {
             explain.append("未检索到相关上下文,将直接根据已有对话历史回答。\n\n");
         }
         String context = buildContext(fused);
+        List<java.util.Map<String, String>> history = messageHistoryService.getGroupHistory(groupId);
         String answer = llmClient.normalResponse(userMessage, context, history);
-        updateConversationHistory(userMessage, answer);
+        messageHistoryService.saveGroupTurn(groupId, groupMemberId, userMessage, answer);
         explain.append("=== 模型回答 ===\n");
         explain.append(answer);
         return explain.toString();
@@ -117,31 +135,12 @@ public class ChatService {
         return context.toString();
     }
 
-    private void updateConversationHistory(String userMessage, String response) {
-        // 获取当前时间戳
-        String currentTimestamp = java.time.LocalDateTime.now().format(java.time.format.DateTimeFormatter.ofPattern("yyyy-MM-dd'T'HH:mm:ss"));
-
-        // 添加用户消息（带时间戳）
-        Map<String, String> userMsgMap = new HashMap<>();
-        userMsgMap.put("role", "user");
-        userMsgMap.put("content", userMessage);
-        userMsgMap.put("timestamp", currentTimestamp);
-        history.add(userMsgMap);
-
-        // 添加助手回复（带时间戳）
-        Map<String, String> assistantMsgMap = new HashMap<>();
-        assistantMsgMap.put("role", "assistant");
-        assistantMsgMap.put("content", response);
-        assistantMsgMap.put("timestamp", currentTimestamp);
-        history.add(assistantMsgMap);
-
-        // 限制历史记录长度，保留最近的20条消息
-        if (history.size() >=HISTORY_CAPACITY) {
-            history = history.subList(history.size() - 20, history.size());
-        }
+    public void clearPrivateHistory(long userId) {
+        messageHistoryService.clearPrivateHistory(userId);
     }
-    public void clearHistory() {
-        history.clear();
+
+    public void clearGroupHistory(long groupId) {
+        messageHistoryService.clearGroupHistory(groupId);
     }
 
 }
