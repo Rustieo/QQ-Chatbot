@@ -30,7 +30,7 @@
         <java.version>21</java.version>
         <spring-ai.version>1.1.0</spring-ai.version>
         <!-- Pin Lombok version for consistent builds -->
-        <lombok.version>1.18.28</lombok.version>
+        <lombok.version>1.18.42</lombok.version>
         <maven.compiler.plugin.version>3.10.1</maven.compiler.plugin.version>
     </properties>
     <dependencies>

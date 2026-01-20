@@ -22,9 +22,9 @@ public class PrivateChatMessage {
     private String role;
 
     private String message;
-
-    @TableField(typeHandler = JsonbTypeHandler.class)
-    private Map<String, Object> meta;
+//
+//    @TableField(typeHandler = JsonbTypeHandler.class)
+//    private Map<String, Object> meta;
 
     private OffsetDateTime createTime;
 }

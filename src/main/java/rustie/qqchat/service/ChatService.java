@@ -1,5 +1,6 @@
 package rustie.qqchat.service;
 
+import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import rustie.qqchat.client.LLMClient;
 import rustie.qqchat.model.dto.ChatMessage;
@@ -9,21 +10,14 @@ import tools.jackson.databind.ObjectMapper;
 
 import java.util.List;
 @Service
+@RequiredArgsConstructor
 public class ChatService {
     private final LLMClient llmClient;
-    private final HybridSearchService searchService;
+    //private final HybridSearchService searchService;
     private final ObjectMapper objectMapper;
     private final MessageHistoryService messageHistoryService;
 
-    public ChatService(LLMClient llmClient,
-                       HybridSearchService searchService,
-                       ObjectMapper objectMapper,
-                       MessageHistoryService messageHistoryService) {
-        this.llmClient = llmClient;
-        this.objectMapper = objectMapper;
-        this.searchService = searchService;
-        this.messageHistoryService = messageHistoryService;
-    }
+
 
     public String normalChatPrivate(long userId, String userMessage) {
         return normalChatPrivate(userId, userMessage, List.of());
@@ -61,51 +55,51 @@ public class ChatService {
         return response;
     }
 
-    public String ragChatPrivate(long userId, String userMessage) {
-        return ragChatPrivate(userId, userMessage, 5);
-    }
+//    public String ragChatPrivate(long userId, String userMessage) {
+//        return ragChatPrivate(userId, userMessage, 5);
+//    }
 
-    public String ragChatPrivate(long userId, String userMessage, int topK) {
-        return ragChatPrivate(userId, userMessage, List.of(), topK);
-    }
+//    public String ragChatPrivate(long userId, String userMessage, int topK) {
+//        return ragChatPrivate(userId, userMessage, List.of(), topK);
+//    }
 
-    /**
-     * If imageUrls is not empty: use Qwen-VL for image understanding (no RAG/no memory/no persistence).
-     */
-    public String ragChatPrivate(long userId, String userMessage, List<String> imageUrls, int topK) {
-        if (imageUrls != null && !imageUrls.isEmpty()) {
-            return llmClient.imageUnderstanding(userMessage, imageUrls);
-        }
-        List<ChatTextSearchResult> searchResults = searchService.search(userMessage, topK);
-        String context = buildContext(searchResults);
-        List<ChatMessage> history = messageHistoryService.getPrivateHistory(userId);
-        String response = llmClient.normalResponse(userMessage, context, history);
-        messageHistoryService.savePrivateTurn(userId, userMessage, response);
-        return response;
-    }
+//    /**
+//     * If imageUrls is not empty: use Qwen-VL for image understanding (no RAG/no memory/no persistence).
+//     */
+//    public String ragChatPrivate(long userId, String userMessage, List<String> imageUrls, int topK) {
+//        if (imageUrls != null && !imageUrls.isEmpty()) {
+//            return llmClient.imageUnderstanding(userMessage, imageUrls);
+//        }
+//        List<ChatTextSearchResult> searchResults = searchService.search(userMessage, topK);
+//        String context = buildContext(searchResults);
+//        List<ChatMessage> history = messageHistoryService.getPrivateHistory(userId);
+//        String response = llmClient.normalResponse(userMessage, context, history);
+//        messageHistoryService.savePrivateTurn(userId, userMessage, response);
+//        return response;
+//    }
 
-    public String ragChatGroup(long groupId, long groupMemberId, String userMessage) {
-        return ragChatGroup(groupId, groupMemberId, userMessage, 5);
-    }
+//    public String ragChatGroup(long groupId, long groupMemberId, String userMessage) {
+//        return ragChatGroup(groupId, groupMemberId, userMessage, 5);
+//    }
+//
+//    public String ragChatGroup(long groupId, long groupMemberId, String userMessage, int topK) {
+//        return ragChatGroup(groupId, groupMemberId, userMessage, List.of(), topK);
+//    }
 
-    public String ragChatGroup(long groupId, long groupMemberId, String userMessage, int topK) {
-        return ragChatGroup(groupId, groupMemberId, userMessage, List.of(), topK);
-    }
-
-    /**
-     * If imageUrls is not empty: use Qwen-VL for image understanding (no RAG/no memory/no persistence).
-     */
-    public String ragChatGroup(long groupId, long groupMemberId, String userMessage, List<String> imageUrls, int topK) {
-        if (imageUrls != null && !imageUrls.isEmpty()) {
-            return llmClient.imageUnderstanding(userMessage, imageUrls);
-        }
-        List<ChatTextSearchResult> searchResults = searchService.search(userMessage, topK);
-        String context = buildContext(searchResults);
-        List<ChatMessage> history = messageHistoryService.getGroupHistory(groupId);
-        String response = llmClient.normalResponse(userMessage, context, history);
-        messageHistoryService.saveGroupTurn(groupId, groupMemberId, userMessage, response);
-        return response;
-    }
+//    /**
+//     * If imageUrls is not empty: use Qwen-VL for image understanding (no RAG/no memory/no persistence).
+//     */
+//    public String ragChatGroup(long groupId, long groupMemberId, String userMessage, List<String> imageUrls, int topK) {
+//        if (imageUrls != null && !imageUrls.isEmpty()) {
+//            return llmClient.imageUnderstanding(userMessage, imageUrls);
+//        }
+//        List<ChatTextSearchResult> searchResults = searchService.search(userMessage, topK);
+//        String context = buildContext(searchResults);
+//        List<ChatMessage> history = messageHistoryService.getGroupHistory(groupId);
+//        String response = llmClient.normalResponse(userMessage, context, history);
+//        messageHistoryService.saveGroupTurn(groupId, groupMemberId, userMessage, response);
+//        return response;
+//    }
 
 
     private String buildContext(List<ChatTextSearchResult> searchResults) {

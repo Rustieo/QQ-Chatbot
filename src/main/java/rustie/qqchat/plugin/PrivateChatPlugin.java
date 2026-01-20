@@ -36,17 +36,5 @@ public class PrivateChatPlugin {
         String sendMsg = MsgUtils.builder().text(response).build();
         bot.sendPrivateMsg(event.getUserId(), sendMsg, false);
     }
-    @PrivateMessageHandler
-    @MessageHandlerFilter(cmd = "^/rq.*")
-    public void callDeepSeekRag(Bot bot, PrivateMessageEvent event) {
-        String message = ChatUtils.getEventPlainText(event).replaceAll("\\s+", " ").trim();
-        List<String> imageUrls = ChatUtils.getEventImageUrls(event);
-        String response = chatService.ragChatPrivate(event.getUserId(), message, imageUrls, 5);
-        String sendMsg = MsgUtils.builder().text(response).build();
-        bot.sendPrivateMsg(event.getUserId(), sendMsg, false);
-    }
-
-
-
 
 }

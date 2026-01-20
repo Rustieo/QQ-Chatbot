@@ -47,16 +47,16 @@ public class GroupChatPlugin {
         bot.sendGroupMsg(event.getGroupId(), sendMsg, false);
     }
 
-    @GroupMessageHandler
-    // 从 @ 提醒触发改为直接正则匹配 /rq 开头
-    @MessageHandlerFilter(cmd = "^/rq.*")
-    public void ragChat(Bot bot, GroupMessageEvent event) {
-        String message = ChatUtils.getEventPlainText(event).replaceAll("\\s+", " ").trim();
-        List<String> imageUrls = ChatUtils.getEventImageUrls(event);
-        String response = chatService.ragChatGroup(event.getGroupId(), event.getUserId(), message, imageUrls, 5);
-        String sendMsg = MsgUtils.builder().text(response).build();
-        bot.sendGroupMsg(event.getGroupId(), sendMsg, false);
-    }
+//    @GroupMessageHandler
+//    // 从 @ 提醒触发改为直接正则匹配 /rq 开头
+//    @MessageHandlerFilter(cmd = "^/rq.*")
+//    public void ragChat(Bot bot, GroupMessageEvent event) {
+//        String message = ChatUtils.getEventPlainText(event).replaceAll("\\s+", " ").trim();
+//        List<String> imageUrls = ChatUtils.getEventImageUrls(event);
+//        String response = chatService.ragChatGroup(event.getGroupId(), event.getUserId(), message, imageUrls, 5);
+//        String sendMsg = MsgUtils.builder().text(response).build();
+//        bot.sendGroupMsg(event.getGroupId(), sendMsg, false);
+//    }
 
     @GroupMessageHandler
     // 从 @ 提醒触发改为直接正则匹配 /role 开头

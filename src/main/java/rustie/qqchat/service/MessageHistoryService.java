@@ -2,8 +2,10 @@ package rustie.qqchat.service;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.github.benmanes.caffeine.cache.Cache;
+import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.web.bind.annotation.RequestMapping;
 import rustie.qqchat.model.dto.ChatMessage;
 import rustie.qqchat.model.entity.GroupChatMessage;
 import rustie.qqchat.model.entity.PrivateChatMessage;
@@ -16,50 +18,28 @@ import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 
-/**
- * Message persistence + local conversation history (Caffeine).
- *
- * Persistence order for each write: DB first, then Caffeine.
- */
-@Service
-public class MessageHistoryService {
 
-    /**
-     * How many message items are kept for LLM history.
-     * Note: one "turn" usually produces 2 items (user + assistant).
-     */
+@Service
+@RequiredArgsConstructor
+public class MessageHistoryService {
     private static final int MAX_HISTORY_ITEMS = 20;
 
     private final PrivateChatMessageMapper privateChatMessageMapper;
     private final GroupChatMessageMapper groupChatMessageMapper;
     private final Cache<String, List<ChatMessage>> messageHistoryCache;
 
-    public MessageHistoryService(PrivateChatMessageMapper privateChatMessageMapper,
-                                 GroupChatMessageMapper groupChatMessageMapper,
-                                 Cache<String, List<ChatMessage>> messageHistoryCache) {
-        this.privateChatMessageMapper = privateChatMessageMapper;
-        this.groupChatMessageMapper = groupChatMessageMapper;
-        this.messageHistoryCache = messageHistoryCache;
-    }
-
     public List<ChatMessage> getPrivateHistory(long userId) {
         return messageHistoryCache.get(privateKey(userId), k -> loadPrivateHistoryFromDb(userId));
     }
-
     public List<ChatMessage> getGroupHistory(long groupId) {
         return messageHistoryCache.get(groupKey(groupId), k -> loadGroupHistoryFromDb(groupId));
     }
-
     @Transactional
     public void savePrivateTurn(long userId, String userMessage, String assistantMessage) {
-        // 1) DB first
         insertPrivateMessage(userId, "user", userMessage);
         insertPrivateMessage(userId, "assistant", assistantMessage);
-
-        // 2) then Caffeine
         String key = privateKey(userId);
         List<ChatMessage> current = messageHistoryCache.getIfPresent(key);
-        // 如果当前缓存不存在，为了不丢历史，回填 DB 最后 N 条（已包含刚插入的两条）
         List<ChatMessage> updated = (current == null)
                 ? loadPrivateHistoryFromDb(userId)
                 : appendHistory(current, List.of(msg("user", userMessage), msg("assistant", assistantMessage)));
@@ -68,12 +48,8 @@ public class MessageHistoryService {
 
     @Transactional
     public void saveGroupTurn(long groupId, long groupMemberId, String userMessage, String assistantMessage) {
-        // 1) DB first
         insertGroupMessage(groupId, groupMemberId, "user", userMessage);
-        // assistant message: group_member is NOT NULL in ddl, use 0 as bot marker
         insertGroupMessage(groupId, 0L, "assistant", assistantMessage);
-
-        // 2) then Caffeine
         String key = groupKey(groupId);
         List<ChatMessage> current = messageHistoryCache.getIfPresent(key);
         List<ChatMessage> updated = (current == null)
@@ -81,13 +57,10 @@ public class MessageHistoryService {
                 : appendHistory(current, List.of(msg("user", userMessage), msg("assistant", assistantMessage)));
         messageHistoryCache.put(key, updated);
     }
-
     @Transactional
     public void clearPrivateHistory(long userId) {
-        // DB
         privateChatMessageMapper.delete(new LambdaQueryWrapper<PrivateChatMessage>()
                 .eq(PrivateChatMessage::getUserId, userId));
-        // cache
         messageHistoryCache.invalidate(privateKey(userId));
     }
 
@@ -137,7 +110,7 @@ public class MessageHistoryService {
         row.setUserId(userId);
         row.setRole(role);
         row.setMessage(message);
-        row.setMeta(Map.of());
+//        row.setMeta(Map.of());
         row.setCreateTime(OffsetDateTime.now());
         privateChatMessageMapper.insert(row);
     }
@@ -148,7 +121,7 @@ public class MessageHistoryService {
         row.setGroupMember(groupMember);
         row.setRole(role);
         row.setMessage(message);
-        row.setMeta(Map.of());
+//        row.setMeta(Map.of());
         row.setCreateTime(OffsetDateTime.now());
         groupChatMessageMapper.insert(row);
     }
