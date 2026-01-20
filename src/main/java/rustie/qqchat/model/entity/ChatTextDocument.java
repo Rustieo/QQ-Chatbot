@@ -1,4 +1,4 @@
-package rustie.qqchat.entity;
+package rustie.qqchat.model.entity;
 
 import lombok.Data;
 

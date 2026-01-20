@@ -15,6 +15,10 @@ import rustie.qqchat.config.AiProperties;
 import rustie.qqchat.service.ChatService;
 import rustie.qqchat.utils.ChatUtils;
 
+import java.util.List;
+
+import java.util.List;
+
 @Shiro
 @Component
 @Slf4j
@@ -34,10 +38,11 @@ public class GroupChatPlugin {
     @GroupMessageHandler
     @MessageHandlerFilter(at = AtEnum.NEED)
     public void normalChat(Bot bot, GroupMessageEvent event) {
-        String rawMessage= ChatUtils.getEventPlainText(event);
+        String rawMessage = ChatUtils.getEventPlainText(event);
         if(rawMessage.startsWith("/"))return;
-        String text=rawMessage.replaceAll("\\s+", " ").trim();
-        String response = chatService.normalChatGroup(event.getGroupId(), event.getUserId(), text);
+        String text = rawMessage.replaceAll("\\s+", " ").trim();
+        List<String> imageUrls = ChatUtils.getEventImageUrls(event);
+        String response = chatService.normalChatGroup(event.getGroupId(), event.getUserId(), text, imageUrls);
         String sendMsg = MsgUtils.builder().text(response).build();
         bot.sendGroupMsg(event.getGroupId(), sendMsg, false);
     }
@@ -46,19 +51,13 @@ public class GroupChatPlugin {
     // 从 @ 提醒触发改为直接正则匹配 /rq 开头
     @MessageHandlerFilter(cmd = "^/rq.*")
     public void ragChat(Bot bot, GroupMessageEvent event) {
-        String message=event.getMessage().replaceAll("\\s+", " ").trim();
-        String response = chatService.ragChatGroup(event.getGroupId(), event.getUserId(), message);
+        String message = ChatUtils.getEventPlainText(event).replaceAll("\\s+", " ").trim();
+        List<String> imageUrls = ChatUtils.getEventImageUrls(event);
+        String response = chatService.ragChatGroup(event.getGroupId(), event.getUserId(), message, imageUrls, 5);
         String sendMsg = MsgUtils.builder().text(response).build();
         bot.sendGroupMsg(event.getGroupId(), sendMsg, false);
     }
-    @GroupMessageHandler
-    @MessageHandlerFilter(cmd = "^/rq/ex.*")
-    public void explainRagChat(Bot bot, GroupMessageEvent event) {
-        String message=event.getMessage().replaceAll("\\s+", " ").trim();
-        String response = chatService.ragChatExplainGroup(event.getGroupId(), event.getUserId(), message);
-        String sendMsg = MsgUtils.builder().text(response).build();
-        bot.sendGroupMsg(event.getGroupId(), sendMsg, false);
-    }
+
     @GroupMessageHandler
     // 从 @ 提醒触发改为直接正则匹配 /role 开头
     @MessageHandlerFilter(cmd = "^/role.*")

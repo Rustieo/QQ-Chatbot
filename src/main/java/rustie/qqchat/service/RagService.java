@@ -1,8 +1,5 @@
 package rustie.qqchat.service;
 
-import rustie.qqchat.entity.ChatText;
-import rustie.qqchat.entity.ChatTextDocument;
-
 ////负责将消息转为ChatTextDocument,存入知识库
 ////也负责进行rag查询
 //public class RagService {

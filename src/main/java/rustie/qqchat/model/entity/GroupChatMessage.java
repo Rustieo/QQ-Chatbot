@@ -1,4 +1,4 @@
-package rustie.qqchat.entity;
+package rustie.qqchat.model.entity;
 
 import com.baomidou.mybatisplus.annotation.IdType;
 import com.baomidou.mybatisplus.annotation.TableField;

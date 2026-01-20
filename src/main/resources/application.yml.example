@@ -22,6 +22,13 @@ deepseek:
     model: deepseek-chat  # 本地: deepseek-r1:7b, 官方: deepseek-chat
     key:  put your key here
 
+qwen:
+  api:
+    url: https://dashscope.aliyuncs.com/compatible-mode/v1
+    model: qwen-plus
+    vl-model: qwen3-vl-plus
+    key: put your key here
+
 embedding:
   api:
     url: https://dashscope.aliyuncs.com/compatible-mode/v1

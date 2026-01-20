@@ -4,8 +4,9 @@ import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.github.benmanes.caffeine.cache.Cache;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
-import rustie.qqchat.entity.GroupChatMessage;
-import rustie.qqchat.entity.PrivateChatMessage;
+import rustie.qqchat.model.dto.ChatMessage;
+import rustie.qqchat.model.entity.GroupChatMessage;
+import rustie.qqchat.model.entity.PrivateChatMessage;
 import rustie.qqchat.mapper.GroupChatMessageMapper;
 import rustie.qqchat.mapper.PrivateChatMessageMapper;
 
@@ -31,21 +32,21 @@ public class MessageHistoryService {
 
     private final PrivateChatMessageMapper privateChatMessageMapper;
     private final GroupChatMessageMapper groupChatMessageMapper;
-    private final Cache<String, List<Map<String, String>>> messageHistoryCache;
+    private final Cache<String, List<ChatMessage>> messageHistoryCache;
 
     public MessageHistoryService(PrivateChatMessageMapper privateChatMessageMapper,
                                  GroupChatMessageMapper groupChatMessageMapper,
-                                 Cache<String, List<Map<String, String>>> messageHistoryCache) {
+                                 Cache<String, List<ChatMessage>> messageHistoryCache) {
         this.privateChatMessageMapper = privateChatMessageMapper;
         this.groupChatMessageMapper = groupChatMessageMapper;
         this.messageHistoryCache = messageHistoryCache;
     }
 
-    public List<Map<String, String>> getPrivateHistory(long userId) {
+    public List<ChatMessage> getPrivateHistory(long userId) {
         return messageHistoryCache.get(privateKey(userId), k -> loadPrivateHistoryFromDb(userId));
     }
 
-    public List<Map<String, String>> getGroupHistory(long groupId) {
+    public List<ChatMessage> getGroupHistory(long groupId) {
         return messageHistoryCache.get(groupKey(groupId), k -> loadGroupHistoryFromDb(groupId));
     }
 
@@ -57,9 +58,9 @@ public class MessageHistoryService {
 
         // 2) then Caffeine
         String key = privateKey(userId);
-        List<Map<String, String>> current = messageHistoryCache.getIfPresent(key);
+        List<ChatMessage> current = messageHistoryCache.getIfPresent(key);
         // 如果当前缓存不存在，为了不丢历史，回填 DB 最后 N 条（已包含刚插入的两条）
-        List<Map<String, String>> updated = (current == null)
+        List<ChatMessage> updated = (current == null)
                 ? loadPrivateHistoryFromDb(userId)
                 : appendHistory(current, List.of(msg("user", userMessage), msg("assistant", assistantMessage)));
         messageHistoryCache.put(key, updated);
@@ -74,8 +75,8 @@ public class MessageHistoryService {
 
         // 2) then Caffeine
         String key = groupKey(groupId);
-        List<Map<String, String>> current = messageHistoryCache.getIfPresent(key);
-        List<Map<String, String>> updated = (current == null)
+        List<ChatMessage> current = messageHistoryCache.getIfPresent(key);
+        List<ChatMessage> updated = (current == null)
                 ? loadGroupHistoryFromDb(groupId)
                 : appendHistory(current, List.of(msg("user", userMessage), msg("assistant", assistantMessage)));
         messageHistoryCache.put(key, updated);
@@ -99,7 +100,7 @@ public class MessageHistoryService {
         messageHistoryCache.invalidate(groupKey(groupId));
     }
 
-    private List<Map<String, String>> loadPrivateHistoryFromDb(long userId) {
+    private List<ChatMessage> loadPrivateHistoryFromDb(long userId) {
         List<PrivateChatMessage> rows = privateChatMessageMapper.selectList(new LambdaQueryWrapper<PrivateChatMessage>()
                 .eq(PrivateChatMessage::getUserId, userId)
                 .orderByDesc(PrivateChatMessage::getId)
@@ -107,7 +108,7 @@ public class MessageHistoryService {
         if (rows == null || rows.isEmpty()) return Collections.emptyList();
 
         // reverse to ascending time order for LLM
-        List<Map<String, String>> history = new ArrayList<>(rows.size());
+        List<ChatMessage> history = new ArrayList<>(rows.size());
         for (int i = rows.size() - 1; i >= 0; i--) {
             PrivateChatMessage r = rows.get(i);
             history.add(msg(r.getRole(), r.getMessage()));
@@ -115,7 +116,7 @@ public class MessageHistoryService {
         return history;
     }
 
-    private List<Map<String, String>> loadGroupHistoryFromDb(long groupId) {
+    private List<ChatMessage> loadGroupHistoryFromDb(long groupId) {
         List<GroupChatMessage> rows = groupChatMessageMapper.selectList(new LambdaQueryWrapper<GroupChatMessage>()
                 .eq(GroupChatMessage::getGroupId, groupId)
                 .orderByDesc(GroupChatMessage::getId)
@@ -123,7 +124,7 @@ public class MessageHistoryService {
         if (rows == null || rows.isEmpty()) return Collections.emptyList();
 
         // reverse to ascending time order for LLM
-        List<Map<String, String>> history = new ArrayList<>(rows.size());
+        List<ChatMessage> history = new ArrayList<>(rows.size());
         for (int i = rows.size() - 1; i >= 0; i--) {
             GroupChatMessage r = rows.get(i);
             history.add(msg(r.getRole(), r.getMessage()));
@@ -152,17 +153,17 @@ public class MessageHistoryService {
         groupChatMessageMapper.insert(row);
     }
 
-    private static Map<String, String> msg(String role, String content) {
-        return Map.of("role", role, "content", content);
+    private static ChatMessage msg(String role, String content) {
+        return new ChatMessage(role, content);
     }
 
-    private static List<Map<String, String>> appendHistory(List<Map<String, String>> current,
-                                                          List<Map<String, String>> additions) {
+    private static List<ChatMessage> appendHistory(List<ChatMessage> current,
+                                                  List<ChatMessage> additions) {
         int currentSize = current != null ? current.size() : 0;
         int addSize = additions != null ? additions.size() : 0;
         if (currentSize == 0 && addSize == 0) return Collections.emptyList();
 
-        List<Map<String, String>> merged = new ArrayList<>(currentSize + addSize);
+        List<ChatMessage> merged = new ArrayList<>(currentSize + addSize);
         if (currentSize > 0) merged.addAll(current);
         if (addSize > 0) merged.addAll(additions);
 

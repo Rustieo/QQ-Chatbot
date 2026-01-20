@@ -1,7 +1,6 @@
 package rustie.qqchat.service;
 
 import co.elastic.clients.elasticsearch.ElasticsearchClient;
-import co.elastic.clients.elasticsearch._types.query_dsl.Operator;
 import co.elastic.clients.elasticsearch.core.SearchResponse;
 
 import org.slf4j.Logger;
@@ -9,8 +8,8 @@ import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import rustie.qqchat.client.EmbeddingClient;
-import rustie.qqchat.entity.ChatTextDocument;
-import rustie.qqchat.entity.ChatTextSearchResult;
+import rustie.qqchat.model.entity.ChatTextDocument;
+import rustie.qqchat.model.entity.ChatTextSearchResult;
 
 import java.util.*;
 

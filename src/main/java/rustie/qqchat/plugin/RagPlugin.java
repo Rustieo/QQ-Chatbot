@@ -2,15 +2,13 @@ package rustie.qqchat.plugin;
 
 import com.mikuac.shiro.annotation.GroupMessageHandler;
 import com.mikuac.shiro.annotation.MessageHandlerFilter;
-import com.mikuac.shiro.annotation.PrivateMessageHandler;
 import com.mikuac.shiro.annotation.common.Shiro;
 import com.mikuac.shiro.common.utils.MsgUtils;
 import com.mikuac.shiro.core.Bot;
 import com.mikuac.shiro.dto.event.message.GroupMessageEvent;
-import com.mikuac.shiro.dto.event.message.PrivateMessageEvent;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
-import rustie.qqchat.entity.ChatText;
+import rustie.qqchat.model.entity.ChatText;
 import rustie.qqchat.service.ElasticsearchService;
 import rustie.qqchat.service.HybridSearchService;
 import rustie.qqchat.service.VectorizationService;

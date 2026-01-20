@@ -14,6 +14,7 @@ import org.springframework.http.MediaType;
 import org.springframework.stereotype.Service;
 import org.springframework.web.reactive.function.client.WebClient;
 import rustie.qqchat.config.AiProperties;
+import rustie.qqchat.model.dto.ChatMessage;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
 
@@ -38,6 +39,7 @@ public class LLMClient {
     private final List<String> buffer = new ArrayList<>();
     private final Map<ModelType, ModelInfo> models = new HashMap<>();
     private ModelType currentModelType;
+    private final String qwenVlModel;
 
     /**
      * 单构造：初始化所有可用模型配置，并默认启用 DeepSeek
@@ -48,8 +50,10 @@ public class LLMClient {
                      @Value("${qwen.api.url}") String qwenUrl,
                      @Value("${qwen.api.key}") String qwenKey,
                      @Value("${qwen.api.model}") String qwenModel,
+                     @Value("${qwen.api.vl-model:qwen3-vl-plus}") String qwenVlModel,
                      AiProperties aiProperties) {
         this.aiProperties = aiProperties;
+        this.qwenVlModel = qwenVlModel;
         // 初始化模型信息表
         models.put(ModelType.DeepSeek, new ModelInfo(deepSeekUrl, deepSeekKey, deepSeekModel));
         models.put(ModelType.Qwen, new ModelInfo(qwenUrl, qwenKey, qwenModel));
@@ -83,7 +87,7 @@ public class LLMClient {
      */
     public String normalResponse(String userMessage,
                                  String context,
-                                 @Nullable List<Map<String, String>> history) {
+                                 @Nullable List<ChatMessage> history) {
         Map<String, Object> request = buildRequest(userMessage, context, history, false);
         String raw;
         try {
@@ -107,7 +111,7 @@ public class LLMClient {
 
     private Map<String, Object> buildRequest(String userMessage,
                                              String context,
-                                             @Nullable List<Map<String, String>> history,
+                                             @Nullable List<ChatMessage> history,
                                              boolean stream) {
         logger.info("构建请求，用户消息：{}，上下文长度：{}，历史消息数：{}",
                 userMessage,
@@ -132,45 +136,22 @@ public class LLMClient {
         return request;
     }
 
-    private List<Map<String, String>> buildMessages(String userMessage,
+    private List<Map<String, Object>> buildMessages(String userMessage,
                                                     String context,
-                                                    List<Map<String, String>> history) {
-        List<Map<String, String>> messages = new ArrayList<>();
+                                                    @Nullable List<ChatMessage> history) {
+        List<Map<String, Object>> messages = new ArrayList<>();
         AiProperties.Prompt promptCfg = aiProperties.getPrompt();
-        // =================================================================
-        // 1. System 区域：仅保留 "人设" 和 "核心规则" (Role + Limitations)
-        // =================================================================
-        StringBuilder systemBuilder = new StringBuilder();
-        String roles = promptCfg.getRoles();
 
-        // 默认兜底的人设，防止 rules 为空时由模型只有空 system
-        if (roles != null && !roles.isBlank()) {
-            systemBuilder.append(roles);
-        } else {
-            systemBuilder.append("你是一个专业的AI助手。请基于用户提供的上下文回答问题。");
-        }
-
-        ////聊天规则
-        List<String> limits = promptCfg.getLimits();
-        if (limits != null && !limits.isEmpty()) {
-            systemBuilder.append("\n\n【行为准则】\n");
-            for (int i = 0; i < limits.size(); i++) {
-                int idx = i + 1;
-                systemBuilder.append(idx).append(". ").append(limits.get(i)).append("\n");
-            }
-
-        }
-
-        messages.add(Map.of(
-                "role", "system",
-                "content", systemBuilder.toString()
-        ));
+        messages.add(Map.of("role", "system", "content", buildSystemPrompt(promptCfg)));
 
         // =================================================================
         // 2. History 区域：历史对话 (History)
         // =================================================================
         if (history != null && !history.isEmpty()) {
-            messages.addAll(history);
+            for (ChatMessage h : history) {
+                if (h == null) continue;
+                messages.add(Map.of("role", h.role(), "content", h.content()));
+            }
         }
 
         // =================================================================
@@ -192,17 +173,104 @@ public class LLMClient {
         // B. 注入当前用户问题
         userContentBuilder.append("我的问题是：").append(userMessage);
 
-        messages.add(Map.of(
-                "role", "user",
-                "content", userContentBuilder.toString()
-        ));
+        messages.add(Map.of("role", "user", "content", userContentBuilder.toString()));
         logger.debug("构建消息完成: System规则长度={}, History条数={}, 最终User内容长度={}",
-                systemBuilder.length(),
+                messages.get(0).get("content") != null ? String.valueOf(messages.get(0).get("content")).length() : 0,
                 (history != null ? history.size() : 0),
                 userContentBuilder.length());
 
         log.debug("\n\n构建消息完成: {}", messages);
         return messages;
+    }
+
+    /**
+     * 图片理解（多模态）。
+     * 注意：不参与记忆/持久化；调用方应自行确保不写入 history / DB。
+     */
+    public String imageUnderstanding(@Nullable String userText, List<String> imageUrls) {
+        if (imageUrls == null || imageUrls.isEmpty()) {
+            return normalResponse(userText == null ? "" : userText, "", null);
+        }
+
+        ModelInfo info = models.get(ModelType.Qwen);
+        if (info == null) {
+            throw new IllegalStateException("Qwen model is not configured.");
+        }
+
+        WebClient client = buildWebClient(info);
+        String prompt = (userText == null || userText.isBlank()) ? "请描述图片内容，并回答我可能想问的问题（如有）。" : userText.trim();
+
+        List<Map<String, Object>> content = new ArrayList<>(imageUrls.size() + 1);
+        for (String url : imageUrls) {
+            if (url == null || url.isBlank()) continue;
+            content.add(Map.of(
+                    "type", "image_url",
+                    "image_url", Map.of("url", url)
+            ));
+        }
+        content.add(Map.of("type", "text", "text", prompt));
+
+        List<Map<String, Object>> messages = new ArrayList<>(2);
+        messages.add(Map.of("role", "system", "content", buildSystemPrompt(aiProperties.getPrompt())));
+        messages.add(Map.of("role", "user", "content", content));
+
+        Map<String, Object> request = new HashMap<>();
+        request.put("model", qwenVlModel);
+        request.put("messages", messages);
+        request.put("stream", false);
+
+        // generation params (reuse)
+        AiProperties.Generation gen = aiProperties.getGeneration();
+        if (gen.getTemperature() != null) request.put("temperature", gen.getTemperature());
+        if (gen.getTopP() != null) request.put("top_p", gen.getTopP());
+        if (gen.getMaxTokens() != null) request.put("max_tokens", gen.getMaxTokens());
+
+        String raw;
+        try {
+            raw = client.post()
+                    .uri("/chat/completions")
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .bodyValue(request)
+                    .retrieve()
+                    .bodyToMono(String.class)
+                    .block();
+        } catch (Exception e) {
+            logger.error("调用千问多模态接口失败", e);
+            throw new RuntimeException("调用千问多模态接口失败", e);
+        }
+
+        if (raw == null || raw.isEmpty()) {
+            throw new RuntimeException("千问多模态返回空响应");
+        }
+        return extractFullContent(raw);
+    }
+
+    private static WebClient buildWebClient(ModelInfo info) {
+        WebClient.Builder builder = WebClient.builder().baseUrl(info.url);
+        if (info.apiKey != null && !info.apiKey.isBlank()) {
+            builder.defaultHeader(HttpHeaders.AUTHORIZATION, "Bearer " + info.apiKey);
+        }
+        return builder.build();
+    }
+
+    private static String buildSystemPrompt(AiProperties.Prompt promptCfg) {
+        // 仅保留 "人设" 和 "核心规则" (Role + Limitations)
+        StringBuilder systemBuilder = new StringBuilder();
+        String roles = promptCfg != null ? promptCfg.getRoles() : null;
+        if (roles != null && !roles.isBlank()) {
+            systemBuilder.append(roles);
+        } else {
+            systemBuilder.append("你是一个专业的AI助手。");
+        }
+
+        List<String> limits = promptCfg != null ? promptCfg.getLimits() : null;
+        if (limits != null && !limits.isEmpty()) {
+            systemBuilder.append("\n\n【行为准则】\n");
+            for (int i = 0; i < limits.size(); i++) {
+                systemBuilder.append(i + 1).append(". ").append(limits.get(i)).append("\n");
+            }
+        }
+        return systemBuilder.toString();
     }
 
     /**
