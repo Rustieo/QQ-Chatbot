@@ -36,3 +36,5 @@ build/
 
 /src/main/resources/application.yml
 
+/src/main/resources/shiro-2.3.5-sources/
+/src/main/resources/shiro-2.3.5-javadoc/

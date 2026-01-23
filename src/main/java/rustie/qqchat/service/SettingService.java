@@ -23,6 +23,8 @@ public class SettingService {
     public static final String LIMIT_CLEAR_COMMAND = "/set/ai/limit/clear";
     // 新增: 模型切换命令
     public static final String MODEL_SWITCH_COMMAND = "/set/ai/model";
+    public static final String MODE_GROUP_TOGGLE_COMMAND = "/set/ai/mode/group";
+    public static final String MODE_PRIVATE_TOGGLE_COMMAND = "/set/ai/mode/private";
 
     private final AiProperties aiProperties;
 
@@ -180,10 +182,9 @@ public class SettingService {
         sb.append("[群] /clear 描述  清空历史记录。");
         sb.append("[群] /new  描述  开启新对话。");
         sb.append("------\n");
-
-        sb.append("【RAG 问答】\n");
-        sb.append("[群] /rq 问题内容  使用知识库进行回答。\n");
-        sb.append("[群] /rq/ex 问题内容  使用知识库进行回答,并输出执行流程 \n");
+        sb.append("【模式切换】\n");
+        sb.append("[群] ").append(MODE_GROUP_TOGGLE_COMMAND).append("  切换群聊 普通/Agent 模式。\n");
+        sb.append("[私聊/群聊] ").append(MODE_PRIVATE_TOGGLE_COMMAND).append("  切换私聊 普通/Agent 模式。\n");
         sb.append("------\n");
         sb.append("【角色 & 系统设置】\n");
         sb.append("[群] /role 描述  让 DeepSeek 根据描述生成系统提示词并更新。\n\n");

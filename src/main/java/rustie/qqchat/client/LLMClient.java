@@ -13,10 +13,14 @@ import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.stereotype.Service;
 import org.springframework.web.reactive.function.client.WebClient;
+import org.springframework.web.reactive.function.client.WebClientResponseException;
+import rustie.qqchat.agent.Tool;
 import rustie.qqchat.config.AiProperties;
 import rustie.qqchat.model.dto.ChatMessage;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
+import tools.jackson.databind.node.ArrayNode;
+import tools.jackson.databind.node.ObjectNode;
 
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -29,11 +33,11 @@ import java.util.Map;
 @Setter
 public class LLMClient {
 
-    // 可切换的运行时字段（去掉 final 以便动态更换模型）
     private WebClient webClient;
     private String apiKey;
     private String model;
     private final AiProperties aiProperties;
+    private final ObjectMapper objectMapper;
     private String systemRole;
     private static final Logger logger = LoggerFactory.getLogger(LLMClient.class);
     private final List<String> buffer = new ArrayList<>();
@@ -41,9 +45,6 @@ public class LLMClient {
     private ModelType currentModelType;
     private final String qwenVlModel;
 
-    /**
-     * 单构造：初始化所有可用模型配置，并默认启用 DeepSeek
-     */
     public LLMClient(@Value("${deepseek.api.url}") String deepSeekUrl,
                      @Value("${deepseek.api.key}") String deepSeekKey,
                      @Value("${deepseek.api.model}") String deepSeekModel,
@@ -51,14 +52,78 @@ public class LLMClient {
                      @Value("${qwen.api.key}") String qwenKey,
                      @Value("${qwen.api.model}") String qwenModel,
                      @Value("${qwen.api.vl-model:qwen3-vl-plus}") String qwenVlModel,
+                     ObjectMapper objectMapper,
                      AiProperties aiProperties) {
         this.aiProperties = aiProperties;
+        this.objectMapper = objectMapper;
         this.qwenVlModel = qwenVlModel;
         // 初始化模型信息表
         models.put(ModelType.DeepSeek, new ModelInfo(deepSeekUrl, deepSeekKey, deepSeekModel));
         models.put(ModelType.Qwen, new ModelInfo(qwenUrl, qwenKey, qwenModel));
         // 默认使用 DeepSeek
         switchModel(ModelType.DeepSeek);
+    }
+
+    public JsonNode createChatCompletion(ArrayNode messages, @Nullable ArrayNode tools) {
+        ObjectNode body = objectMapper.createObjectNode();
+        body.put("model", model);
+        body.set("messages", messages);
+        if (tools != null && !tools.isEmpty()) {
+            body.set("tools", tools);
+            body.put("tool_choice", "auto");
+        }
+        String raw;
+        try {
+            raw = webClient.post()
+                    .uri("/chat/completions")
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .bodyValue(body)
+                    .retrieve()
+                    .bodyToMono(String.class)
+                    .block();
+        } catch (WebClientResponseException e) {
+            // DeepSeek/OpenAI-compatible APIs usually return a useful JSON error body; log it.
+            String respBody = e.getResponseBodyAsString();
+            if (respBody != null && !respBody.isBlank()) {
+                logger.error("调用模型 chat/completions 失败: status={} {}",
+                        e.getStatusCode().value(), e.getStatusText(),  e);
+            } else {
+                logger.error("调用模型 chat/completions 失败: status={} {} (empty body)",
+                        e.getStatusCode().value(), e.getStatusText(), e);
+            }
+            throw new RuntimeException("调用模型 chat/completions 失败: " + e.getStatusCode().value(), e);
+        } catch (Exception e) {
+            logger.error("调用模型 chat/completions 失败", e);
+            throw new RuntimeException("调用模型 chat/completions 失败", e);
+        }
+        if (raw == null || raw.isEmpty()) {
+            throw new RuntimeException("模型返回空响应");
+        }
+        try {
+            return objectMapper.readTree(raw);
+        } catch (Exception e) {
+            logger.error("解析 chat/completions 响应失败", e);
+            throw new RuntimeException("解析 chat/completions 响应失败", e);
+        }
+    }
+
+    public JsonNode createChatCompletion(ArrayNode messages, @Nullable ArrayNode tools, @Nullable String traceId) {
+        // traceId is currently only for upstream logging; keep signature for agent compatibility.
+        return createChatCompletion(messages, tools);
+    }
+
+    public static ArrayNode toolsPayload(ObjectMapper om, List<Tool> tools) {
+        ArrayNode arr = om.createArrayNode();
+        for (var t : tools) {
+            ObjectNode toolNode = om.createObjectNode();
+            toolNode.put("type", "function");
+            ObjectNode fn = toolNode.putObject("function");
+            fn.put("name", t.name());
+            fn.put("description", t.description());
+            fn.set("parameters", t.parameters(om));
+            arr.add(toolNode);
+        }
+        return arr;
     }
 
     /**
@@ -98,6 +163,16 @@ public class LLMClient {
                     .retrieve()
                     .bodyToMono(String.class)
                     .block(); // 阻塞拿到完整结果
+        } catch (WebClientResponseException e) {
+            String respBody = e.getResponseBodyAsString();
+            if (respBody != null && !respBody.isBlank()) {
+                logger.error("调用模型接口失败: status={} {}",
+                        e.getStatusCode().value(), e.getStatusText(), e);
+            } else {
+                logger.error("调用模型接口失败: status={} {} (empty body)",
+                        e.getStatusCode().value(), e.getStatusText(), e);
+            }
+            throw new RuntimeException("调用模型接口失败: " + e.getStatusCode().value(), e);
         } catch (Exception e) {
             logger.error("调用模型接口失败", e);
             throw new RuntimeException("调用模型接口失败", e);
@@ -155,22 +230,9 @@ public class LLMClient {
         }
 
         // =================================================================
-        // 3. User 区域：RAG 上下文 + 当前问题 (Context + Question)
+        // 3. User 区域:当前问题 (Context + Question)
         // =================================================================
         StringBuilder userContentBuilder = new StringBuilder();
-
-        // A. 注入 RAG 知识 (如果有)
-        if (context != null && !context.isBlank()) {
-            userContentBuilder.append("请参考以下 <context> 标签内的信息来回答我的问题：\n\n");
-            userContentBuilder.append("<context>\n");
-            userContentBuilder.append(context).append("\n");
-            userContentBuilder.append("</context>\n\n");
-            //这里可以降低幻觉
-            userContentBuilder.append("（如果参考信息中没有答案，请直接说明，不要编造。）\n\n");
-        } else {
-            userContentBuilder.append("（暂无参考资料，请根据你的通用知识回答）\n\n");
-        }
-        // B. 注入当前用户问题
         userContentBuilder.append("我的问题是：").append(userMessage);
 
         messages.add(Map.of("role", "user", "content", userContentBuilder.toString()));
@@ -234,6 +296,16 @@ public class LLMClient {
                     .retrieve()
                     .bodyToMono(String.class)
                     .block();
+        } catch (WebClientResponseException e) {
+            String respBody = e.getResponseBodyAsString();
+            if (respBody != null && !respBody.isBlank()) {
+                logger.error("调用千问多模态接口失败: status={} {}",
+                        e.getStatusCode().value(), e.getStatusText(), e);
+            } else {
+                logger.error("调用千问多模态接口失败: status={} {} (empty body)",
+                        e.getStatusCode().value(), e.getStatusText(), e);
+            }
+            throw new RuntimeException("调用千问多模态接口失败: " + e.getStatusCode().value(), e);
         } catch (Exception e) {
             logger.error("调用千问多模态接口失败", e);
             throw new RuntimeException("调用千问多模态接口失败", e);
@@ -244,6 +316,7 @@ public class LLMClient {
         }
         return extractFullContent(raw);
     }
+
 
     private static WebClient buildWebClient(ModelInfo info) {
         WebClient.Builder builder = WebClient.builder().baseUrl(info.url);
@@ -278,22 +351,28 @@ public class LLMClient {
      */
     private String extractFullContent(String response) {
         try {
-            ObjectMapper mapper = new ObjectMapper();
-            JsonNode node = mapper.readTree(response);
+            JsonNode node = objectMapper.readTree(response);
 
             // 先检查是否有 error
             JsonNode errorNode = node.path("error");
             if (!errorNode.isMissingNode() && !errorNode.isNull()) {
-                String msg = errorNode.path("message").asText("模型返回错误");
+                JsonNode msgNode = errorNode.path("message");
+                String msg;
+                if (msgNode.isMissingNode() || msgNode.isNull()) msg = "模型返回错误";
+                else if (msgNode.isTextual()) msg = msgNode.textValue();
+                else msg = msgNode.toString();
                 logger.error("模型错误响应: {}", msg);
                 throw new RuntimeException(msg);
             }
 
-            String content = node.path("choices")
+            JsonNode contentNode = node.path("choices")
                     .path(0)
                     .path("message")
-                    .path("content")
-                    .asText("");
+                    .path("content");
+            String content;
+            if (contentNode.isMissingNode() || contentNode.isNull()) content = "";
+            else if (contentNode.isTextual()) content = contentNode.textValue();
+            else content = contentNode.toString();
 
             if (content.isEmpty()) {
                 logger.error("响应中没有 content 字段，原始响应: {}", response);

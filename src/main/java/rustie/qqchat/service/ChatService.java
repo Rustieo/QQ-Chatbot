@@ -2,9 +2,11 @@ package rustie.qqchat.service;
 
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
+import rustie.qqchat.agent.ReActAgent;
 import rustie.qqchat.client.LLMClient;
 import rustie.qqchat.model.dto.ChatMessage;
 import rustie.qqchat.model.entity.ChatTextSearchResult;
+import rustie.qqchat.utils.IdHolder;
 import tools.jackson.databind.ObjectMapper;
 
 
@@ -16,20 +18,29 @@ public class ChatService {
     //private final HybridSearchService searchService;
     private final ObjectMapper objectMapper;
     private final MessageHistoryService messageHistoryService;
+    private final ReActAgent reActAgent;
+    private boolean groupAgentEnabled = false;
+    private boolean privateAgentEnabled = false;
 
-
+    public boolean switchGroupAgentMode() {
+        groupAgentEnabled = !groupAgentEnabled;
+        return groupAgentEnabled;
+    }
+    public boolean switchPrivateAgentMode() {
+        privateAgentEnabled = !privateAgentEnabled;
+        return privateAgentEnabled;
+    }
 
     public String normalChatPrivate(long userId, String userMessage) {
         return normalChatPrivate(userId, userMessage, List.of());
     }
 
-    /**
-     * If imageUrls is not empty: use Qwen-VL for image understanding.
-     * NOTE: image understanding is NOT persisted and NOT added to memory/history.
-     */
     public String normalChatPrivate(long userId, String userMessage, List<String> imageUrls) {
         if (imageUrls != null && !imageUrls.isEmpty()) {
             return llmClient.imageUnderstanding(userMessage, imageUrls);
+        }
+        if (privateAgentEnabled) {
+            return agentChatPrivate(userId, userMessage);
         }
         List<ChatMessage> history = messageHistoryService.getPrivateHistory(userId);
         String response = llmClient.normalResponse(userMessage, "", history);
@@ -49,58 +60,42 @@ public class ChatService {
         if (imageUrls != null && !imageUrls.isEmpty()) {
             return llmClient.imageUnderstanding(userMessage, imageUrls);
         }
+        if (groupAgentEnabled) {
+            return agentChatGroup(groupId, groupMemberId, userMessage);
+        }
         List<ChatMessage> history = messageHistoryService.getGroupHistory(groupId);
         String response = llmClient.normalResponse(userMessage, "", history);
         messageHistoryService.saveGroupTurn(groupId, groupMemberId, userMessage, response);
         return response;
     }
 
-//    public String ragChatPrivate(long userId, String userMessage) {
-//        return ragChatPrivate(userId, userMessage, 5);
-//    }
+    private String agentChatGroup(long groupId, long groupMemberId, String userMessage) {
+        try {
+            return reActAgent.run(userMessage, 8).output();
+        } catch (Exception e) {
+            return "Agent 运行失败: " + (e.getMessage() == null ? e.getClass().getSimpleName() : e.getMessage());
+        } finally {
+            IdHolder.removeAll();
+        }
+    }
 
-//    public String ragChatPrivate(long userId, String userMessage, int topK) {
-//        return ragChatPrivate(userId, userMessage, List.of(), topK);
-//    }
+    private String agentChatPrivate(long userId, String userMessage) {
+        try {
+            return reActAgent.run(userMessage, 8).output();
+        } catch (Exception e) {
+            return "Agent 运行失败: " + (e.getMessage() == null ? e.getClass().getSimpleName() : e.getMessage());
+        } finally {
+            IdHolder.removeAll();
+        }
+    }
 
-//    /**
-//     * If imageUrls is not empty: use Qwen-VL for image understanding (no RAG/no memory/no persistence).
-//     */
-//    public String ragChatPrivate(long userId, String userMessage, List<String> imageUrls, int topK) {
-//        if (imageUrls != null && !imageUrls.isEmpty()) {
-//            return llmClient.imageUnderstanding(userMessage, imageUrls);
-//        }
-//        List<ChatTextSearchResult> searchResults = searchService.search(userMessage, topK);
-//        String context = buildContext(searchResults);
-//        List<ChatMessage> history = messageHistoryService.getPrivateHistory(userId);
-//        String response = llmClient.normalResponse(userMessage, context, history);
-//        messageHistoryService.savePrivateTurn(userId, userMessage, response);
-//        return response;
-//    }
+    public boolean isGroupAgentEnabled() {
+        return groupAgentEnabled;
+    }
 
-//    public String ragChatGroup(long groupId, long groupMemberId, String userMessage) {
-//        return ragChatGroup(groupId, groupMemberId, userMessage, 5);
-//    }
-//
-//    public String ragChatGroup(long groupId, long groupMemberId, String userMessage, int topK) {
-//        return ragChatGroup(groupId, groupMemberId, userMessage, List.of(), topK);
-//    }
-
-//    /**
-//     * If imageUrls is not empty: use Qwen-VL for image understanding (no RAG/no memory/no persistence).
-//     */
-//    public String ragChatGroup(long groupId, long groupMemberId, String userMessage, List<String> imageUrls, int topK) {
-//        if (imageUrls != null && !imageUrls.isEmpty()) {
-//            return llmClient.imageUnderstanding(userMessage, imageUrls);
-//        }
-//        List<ChatTextSearchResult> searchResults = searchService.search(userMessage, topK);
-//        String context = buildContext(searchResults);
-//        List<ChatMessage> history = messageHistoryService.getGroupHistory(groupId);
-//        String response = llmClient.normalResponse(userMessage, context, history);
-//        messageHistoryService.saveGroupTurn(groupId, groupMemberId, userMessage, response);
-//        return response;
-//    }
-
+    public boolean isPrivateAgentEnabled() {
+        return privateAgentEnabled;
+    }
 
     private String buildContext(List<ChatTextSearchResult> searchResults) {
         if (searchResults == null || searchResults.isEmpty()) {

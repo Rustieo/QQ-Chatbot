@@ -127,4 +127,21 @@ public class SettingPlugin {
     public void showHelp(Bot bot, AnyMessageEvent event) {
         bot.sendMsg(event, settingService.buildHelpMessage(), false);
     }
+
+    // ===== 新增: 模式切换（普通 / agent）=====
+    @GroupMessageHandler
+    @MessageHandlerFilter(cmd = "^/set/ai/mode/group$")
+    public void switchGroupMode(Bot bot, GroupMessageEvent event) {
+        boolean enabled = chatService.switchGroupAgentMode();
+        String msg = enabled ? "群聊已切换到 Agent 模式（纯文本对话）" : "群聊已切换到 普通模式";
+        bot.sendGroupMsg(event.getGroupId(), msg, false);
+    }
+
+    @AnyMessageHandler
+    @MessageHandlerFilter(cmd = "^/set/ai/mode/private$")
+    public void switchPrivateMode(Bot bot, AnyMessageEvent event) {
+        boolean enabled = chatService.switchPrivateAgentMode();
+        String msg = enabled ? "私聊已切换到 Agent 模式（纯文本对话）" : "私聊已切换到 普通模式";
+        bot.sendMsg(event, msg, false);
+    }
 }
