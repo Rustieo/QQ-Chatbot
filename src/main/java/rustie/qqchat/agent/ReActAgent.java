@@ -29,8 +29,10 @@ public final class ReActAgent {
     public Result run(String userInput, int maxIters) throws Exception {int upper = Math.max(1, maxIters);
         ArrayNode messages = om.createArrayNode();
         messages.add(systemMessage("""
-                You are a helpful agent. You may call tools when needed.
-                If you call a tool, use the tool result to continue reasoning and then answer the user.
+                你是一个有工具可用的助手。
+                - 需要外部信息时请调用工具（tool_choice=auto）。
+                - 如果用户消息携带了图片，你无法直接“看见”图片内容，请调用图片理解工具再回答。
+                - 若调用到“会直接向用户返回结果”的工具（如生图工具），调用后无需再输出额外文本。
                 """));
         messages.add(userMessage(userInput));
 
@@ -98,6 +100,11 @@ public final class ReActAgent {
                         long toolMs = (System.nanoTime() - toolT0) / 1_000_000;
                         log.info("工具调用：执行完成 name={}，tool_call_id={}，耗时={}ms，结果={}",
                                 toolName, toolCallId, toolMs, clip(om.writeValueAsString(result)));
+                        if (tool.returnDirect()) {
+                            String out = tool.toUserText(result, om);
+                            log.info("工具调用：returnDirect 触发，直接返回给用户：{}", clip(out));
+                            return new Result(out, i, "tool_return_direct");
+                        }
                     }
                 } catch (Exception e) {
                     log.warn(" 工具调用：执行失败 name={}，tool_call_id={}，args={}，异常={}",
@@ -107,8 +114,14 @@ public final class ReActAgent {
                             .put("message", e.getMessage() == null ? e.getClass().getSimpleName() : e.getMessage());
                 }
 
-                toolMsg.put("content", om.writeValueAsString(result));
-                messages.add(toolMsg);
+                Tool tool = registry.get(toolName);
+                boolean include = tool == null || tool.includeResultInModelContext();
+                if (include) {
+                    toolMsg.put("content", om.writeValueAsString(result));
+                    messages.add(toolMsg);
+                } else {
+                    log.info("工具调用：按配置不回传给模型 name={} tool_call_id={}", toolName, toolCallId);
+                }
             }
         }
 

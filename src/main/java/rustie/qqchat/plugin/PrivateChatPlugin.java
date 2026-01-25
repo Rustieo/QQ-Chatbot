@@ -1,6 +1,5 @@
 package rustie.qqchat.plugin;
 
-import com.mikuac.shiro.annotation.MessageHandlerFilter;
 import com.mikuac.shiro.annotation.PrivateMessageHandler;
 import com.mikuac.shiro.annotation.common.Shiro;
 import com.mikuac.shiro.common.utils.MsgUtils;
@@ -9,6 +8,7 @@ import com.mikuac.shiro.dto.event.message.PrivateMessageEvent;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
 import rustie.qqchat.utils.ChatUtils;
+import rustie.qqchat.utils.IdHolder;
 import rustie.qqchat.service.ChatService;
 
 import java.util.List;
@@ -32,6 +32,7 @@ public class PrivateChatPlugin {
         if(rawMessage.startsWith("/"))return;
         String message = rawMessage.replaceAll("\\s+", " ").trim();
         List<String> imageUrls = ChatUtils.getEventImageUrls(event);
+        IdHolder.setImageUrls(imageUrls);
         String response = chatService.normalChatPrivate(event.getUserId(), message, imageUrls);
         String sendMsg = MsgUtils.builder().text(response).build();
         bot.sendPrivateMsg(event.getUserId(), sendMsg, false);

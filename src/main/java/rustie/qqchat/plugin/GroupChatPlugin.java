@@ -5,7 +5,6 @@ import com.mikuac.shiro.annotation.MessageHandlerFilter;
 import com.mikuac.shiro.annotation.common.Shiro;
 import com.mikuac.shiro.common.utils.MsgUtils;
 import com.mikuac.shiro.core.Bot;
-import com.mikuac.shiro.core.BotContainer;
 import com.mikuac.shiro.dto.event.message.GroupMessageEvent;
 import com.mikuac.shiro.enums.AtEnum;
 import lombok.extern.slf4j.Slf4j;
@@ -15,8 +14,7 @@ import rustie.qqchat.client.LLMClient;
 import rustie.qqchat.config.AiProperties;
 import rustie.qqchat.service.ChatService;
 import rustie.qqchat.utils.ChatUtils;
-
-import java.util.List;
+import rustie.qqchat.utils.IdHolder;
 
 import java.util.List;
 
@@ -44,6 +42,7 @@ public class GroupChatPlugin {
         if(rawMessage.startsWith("/"))return;
         String text = rawMessage.replaceAll("\\s+", " ").trim();
         List<String> imageUrls = ChatUtils.getEventImageUrls(event);
+        IdHolder.setImageUrls(imageUrls);
         String response = chatService.normalChatGroup(event.getGroupId(), event.getUserId(), text, imageUrls);
         String sendMsg = MsgUtils.builder().text(response).build();
         bot.sendGroupMsg(event.getGroupId(), sendMsg, false);

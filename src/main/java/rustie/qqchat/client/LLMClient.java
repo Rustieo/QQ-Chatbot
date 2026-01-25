@@ -126,9 +126,6 @@ public class LLMClient {
         return arr;
     }
 
-    /**
-     * 切换当前使用的模型。如果模型配置不存在则返回 false。
-     */
     public synchronized boolean switchModel(ModelType type) {
         ModelInfo info = models.get(type);
         if (info == null) {
@@ -147,9 +144,6 @@ public class LLMClient {
         return true;
     }
 
-    /**
-     * 非流式，一次性返回完整结果，适合 QQ 机器人回复
-     */
     public String normalResponse(String userMessage,
                                  String context,
                                  @Nullable List<ChatMessage> history) {
@@ -197,17 +191,10 @@ public class LLMClient {
         request.put("model", model);
         request.put("messages", buildMessages(userMessage, context, history));
         request.put("stream", stream);
-        // 生成参数
         AiProperties.Generation gen = aiProperties.getGeneration();
-        if (gen.getTemperature() != null) {
-            request.put("temperature", gen.getTemperature());
-        }
-        if (gen.getTopP() != null) {
-            request.put("top_p", gen.getTopP());
-        }
-        if (gen.getMaxTokens() != null) {
-            request.put("max_tokens", gen.getMaxTokens());
-        }
+        if (gen.getTemperature() != null)   request.put("temperature", gen.getTemperature());
+        if (gen.getTopP() != null)          request.put("top_p", gen.getTopP());
+        if (gen.getMaxTokens() != null)     request.put("max_tokens", gen.getMaxTokens());
         return request;
     }
 

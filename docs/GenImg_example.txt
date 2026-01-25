@@ -1,0 +1,28 @@
+curl https://ark.cn-beijing.volces.com/api/v3/images/generations \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer $ARK_API_KEY" \
+  -d '{
+    "model": "doubao-seedream-4-5-251128",
+    "prompt": "将图1的服装换为图2的服装",
+    "image": ["url1", "url2"],
+    "sequential_image_generation": "disabled",
+    "size": "2K",
+    "watermark": false
+}'
+
+Response:
+{
+    "model": "doubao-seedream-4-5-251128",
+    "created": 1769366655,
+    "data": [
+        {
+            "url": "url",
+            "size": "2048x2048"
+        }
+    ],
+    "usage": {
+        "generated_images": 1,
+        "output_tokens": 16384,
+        "total_tokens": 16384
+    }
+}
