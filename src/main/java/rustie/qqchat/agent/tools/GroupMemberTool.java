@@ -13,6 +13,8 @@ import tools.jackson.databind.ObjectMapper;
 import tools.jackson.databind.node.ArrayNode;
 import tools.jackson.databind.node.ObjectNode;
 
+import javax.annotation.concurrent.ThreadSafe;
+
 @Component
 @RequiredArgsConstructor
 public class GroupMemberTool implements Tool {
@@ -23,7 +25,9 @@ public class GroupMemberTool implements Tool {
     }
     @Override
     public final String description() {
-        return "获取当前群的成员列表（仅返回 userid/nickname/sex）。";
+        return "获取当前群的成员列表（仅返回 userid(即QQ号)/nickname/sex）。"
+            + "当用户只给了昵称/群名片（如：‘xxx’）但没给QQ号时，先调用本工具做匹配。"
+            + "如果昵称命中多个候选，先把候选列出来并追问用户确认后再进行下一步。";
     }
     @Override
     public JsonNode execute(JsonNode args, ObjectMapper om) throws Exception {

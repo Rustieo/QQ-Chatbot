@@ -1,13 +1,15 @@
 package rustie.qqchat.client;
 
 
+import okhttp3.MediaType;
+import okhttp3.OkHttpClient;
+import okhttp3.Request;
+import okhttp3.RequestBody;
+import okhttp3.Response;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
-import org.springframework.web.reactive.function.client.WebClient;
-import org.springframework.web.reactive.function.client.WebClientResponseException;
-import reactor.util.retry.Retry;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
 
@@ -19,6 +21,14 @@ import java.util.Map;
 @Component
 public class EmbeddingClient {
 
+    private static final MediaType JSON = MediaType.get("application/json; charset=utf-8");
+
+    @Value("${embedding.api.url}")
+    private String apiUrl;
+
+    @Value("${embedding.api.key}")
+    private String apiKey;
+
     @Value("${embedding.api.model}")
     private String modelId;
     
@@ -29,11 +39,13 @@ public class EmbeddingClient {
     private int dimension;
     
     private static final Logger logger = LoggerFactory.getLogger(EmbeddingClient.class);
-    private final WebClient webClient;
+    private final OkHttpClient httpClient;
     private final ObjectMapper objectMapper;
 
-    public EmbeddingClient(WebClient embeddingWebClient, ObjectMapper objectMapper) {
-        this.webClient = embeddingWebClient;
+    public EmbeddingClient(ObjectMapper objectMapper) {
+        this.httpClient = new OkHttpClient.Builder()
+                .callTimeout(Duration.ofSeconds(30))
+                .build();
         this.objectMapper = objectMapper;
     }
 
@@ -57,14 +69,53 @@ public class EmbeddingClient {
         requestBody.put("input", text);
         requestBody.put("dimension", dimension);  // 直接在根级别设置dimension
         requestBody.put("encoding_format", "float");  // 添加编码格式
-        return webClient.post()
-                .uri("/embeddings")
-                .bodyValue(requestBody)
-                .retrieve()
-                .bodyToMono(String.class)
-                .retryWhen(Retry.fixedDelay(3, Duration.ofSeconds(1))
-                        .filter(e -> e instanceof WebClientResponseException))
-                .block(Duration.ofSeconds(30));
+
+        String json;
+        try {
+            json = objectMapper.writeValueAsString(requestBody);
+        } catch (Exception e) {
+            throw new RuntimeException("构建 embeddings 请求失败", e);
+        }
+
+        String url = joinUrl(apiUrl, "/embeddings");
+        // 保持与原先 Retry.fixedDelay(3, 1s) 一致：失败后重试 3 次（总共最多 4 次）
+        for (int attempt = 0; attempt <= 3; attempt++) {
+            Request.Builder rb = new Request.Builder()
+                    .url(url)
+                    .post(RequestBody.create(json, JSON));
+            if (apiKey != null && !apiKey.isBlank()) {
+                rb.header("Authorization", "Bearer " + apiKey);
+            }
+
+            try (Response resp = httpClient.newCall(rb.build()).execute()) {
+                String body = resp.body() != null ? resp.body().string() : "";
+                if (resp.isSuccessful()) {
+                    return body;
+                }
+                if (attempt >= 3) {
+                    throw new RuntimeException("向量化 API 返回错误: " + resp.code() + " " + resp.message()
+                            + (body == null || body.isBlank() ? "" : (", body=" + body)));
+                }
+            } catch (Exception e) {
+                if (attempt >= 3) throw new RuntimeException(e.getMessage(), e);
+            }
+
+            try {
+                Thread.sleep(1000L);
+            } catch (InterruptedException ie) {
+                Thread.currentThread().interrupt();
+                throw new RuntimeException("向量化 API 重试被中断", ie);
+            }
+        }
+        throw new RuntimeException("向量化 API 调用失败");
+    }
+
+    private static String joinUrl(String baseUrl, String path) {
+        if (baseUrl == null) baseUrl = "";
+        if (path == null) path = "";
+        String b = baseUrl.endsWith("/") ? baseUrl.substring(0, baseUrl.length() - 1) : baseUrl;
+        String p = path.startsWith("/") ? path : "/" + path;
+        return b + p;
     }
 
     private float[] parseVectors(String response) throws Exception {

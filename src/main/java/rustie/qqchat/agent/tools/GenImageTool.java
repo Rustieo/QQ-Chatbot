@@ -3,10 +3,12 @@ package rustie.qqchat.agent.tools;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpHeaders;
-import org.springframework.http.MediaType;
 import org.springframework.stereotype.Component;
-import org.springframework.web.reactive.function.client.WebClient;
-import org.springframework.web.reactive.function.client.WebClientResponseException;
+import okhttp3.MediaType;
+import okhttp3.OkHttpClient;
+import okhttp3.Request;
+import okhttp3.RequestBody;
+import okhttp3.Response;
 import rustie.qqchat.agent.Tool;
 import rustie.qqchat.utils.IdHolder;
 import tools.jackson.databind.JsonNode;
@@ -25,17 +27,21 @@ import java.util.List;
 @Component
 @Slf4j
 public class GenImageTool implements Tool {
-    private final WebClient client;
+    private static final MediaType JSON = MediaType.get("application/json; charset=utf-8");
+
+    private final OkHttpClient client;
+    private final String baseUrl;
+    private final String apiKey;
     private final String model;
 
     public GenImageTool(@Value("${genimg.api.url:https://ark.cn-beijing.volces.com/api/v3}") String baseUrl,
                         @Value("${genimg.api.key:}") String apiKey,
-                        @Value("${genimg.api.model:doubao-seedream-4-5-251128}") String model) {
-        WebClient.Builder b = WebClient.builder().baseUrl(baseUrl);
-        if (apiKey != null && !apiKey.isBlank()) {
-            b.defaultHeader(HttpHeaders.AUTHORIZATION, "Bearer " + apiKey);
-        }
-        this.client = b.build();
+                        @Value("${genimg.api.model:doubao-seedream-4-5-251128}")
+                        String model,
+                        OkHttpClient client) {
+        this.client =client;
+        this.baseUrl = baseUrl;
+        this.apiKey = apiKey;
         this.model = model;
     }
 
@@ -46,7 +52,7 @@ public class GenImageTool implements Tool {
 
     @Override
     public String description() {
-        return "生图/改图工具：当用户倾向于生成图片、改图、换装、风格转换、把图A改成图B等，并且消息里带有图片时调用。"
+        return "生图/改图工具：当用户倾向于生成图片（可无输入图）、改图、换装、风格转换、把图A改成图B等时调用。"
                 + "该工具会直接把生成结果返回给用户（调用后无需再输出额外解释）。";
     }
 
@@ -74,7 +80,7 @@ public class GenImageTool implements Tool {
 
         ObjectNode size = om.createObjectNode();
         size.put("type", "string");
-        size.put("description", "输出尺寸，例如：2K / 1K（可选，默认2K）。");
+        size.put("description", "输出尺寸，例如：2K / 4K（可选，默认2K）。");
         props.set("size", size);
 
         ObjectNode watermark = om.createObjectNode();
@@ -131,21 +137,25 @@ public class GenImageTool implements Tool {
         body.put("watermark", watermark);
 
         String raw;
-        try {
-            raw = client.post()
-                    .uri("/images/generations")
-                    .contentType(MediaType.APPLICATION_JSON)
-                    .bodyValue(body)
-                    .retrieve()
-                    .bodyToMono(String.class)
-                    .block();
-        } catch (WebClientResponseException e) {
-            String respBody = e.getResponseBodyAsString();
-            log.error("GenImage 调用失败: status={} {}", e.getStatusCode().value(), e.getStatusText(), e);
-            return om.createObjectNode()
-                    .put("error", "upstream_error")
-                    .put("status", e.getStatusCode().value())
-                    .put("message", respBody);
+        Request request = new Request.Builder()
+                .url(joinUrl(this.baseUrl, "/images/generations"))
+                .post(RequestBody.create(om.writeValueAsString(body), JSON))
+                .build();
+        if (apiKey != null && !apiKey.isBlank()) {
+            request = request.newBuilder()
+                    .header(HttpHeaders.AUTHORIZATION, "Bearer " + apiKey)
+                    .build();
+        }
+
+        try (Response resp = client.newCall(request).execute()) {
+            raw = resp.body() != null ? resp.body().string() : "";
+            if (!resp.isSuccessful()) {
+                log.error("GenImage 调用失败: status={} {}", resp.code(), resp.message());
+                return om.createObjectNode()
+                        .put("error", "upstream_error")
+                        .put("status", resp.code())
+                        .put("message", raw);
+            }
         }
         if (raw == null || raw.isBlank()) {
             return om.createObjectNode().put("error", "empty_response").put("message", "empty response");
@@ -166,6 +176,14 @@ public class GenImageTool implements Tool {
         out.set("urls", urls);
         if (resp.has("usage")) out.set("usage", resp.get("usage"));
         return out;
+    }
+
+    private static String joinUrl(String baseUrl, String path) {
+        if (baseUrl == null) baseUrl = "";
+        if (path == null) path = "";
+        String b = baseUrl.endsWith("/") ? baseUrl.substring(0, baseUrl.length() - 1) : baseUrl;
+        String p = path.startsWith("/") ? path : "/" + path;
+        return b + p;
     }
 
     @Override

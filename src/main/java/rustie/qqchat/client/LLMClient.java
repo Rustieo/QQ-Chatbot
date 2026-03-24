@@ -6,14 +6,16 @@ import lombok.Data;
 import lombok.Getter;
 import lombok.Setter;
 import lombok.extern.slf4j.Slf4j;
+import okhttp3.MediaType;
+import okhttp3.OkHttpClient;
+import okhttp3.Request;
+import okhttp3.RequestBody;
+import okhttp3.Response;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpHeaders;
-import org.springframework.http.MediaType;
 import org.springframework.stereotype.Service;
-import org.springframework.web.reactive.function.client.WebClient;
-import org.springframework.web.reactive.function.client.WebClientResponseException;
 import rustie.qqchat.agent.Tool;
 import rustie.qqchat.config.AiProperties;
 import rustie.qqchat.model.dto.ChatMessage;
@@ -33,9 +35,14 @@ import java.util.Map;
 @Setter
 public class LLMClient {
 
-    private WebClient webClient;
+    private static final MediaType JSON = MediaType.get("application/json; charset=utf-8");
+
+    // WebClient 默认不会强制 10s 读取超时；OkHttp 默认 readTimeout=10s，会导致多模态/长耗时请求超时。
+    // 这里保持与旧实现一致：不对读取/写入设置硬超时（仅保留连接超时）。
+    private final OkHttpClient httpClient ;
     private String apiKey;
     private String model;
+    private String baseUrl;
     private final AiProperties aiProperties;
     private final ObjectMapper objectMapper;
     private String systemRole;
@@ -53,10 +60,12 @@ public class LLMClient {
                      @Value("${qwen.api.model}") String qwenModel,
                      @Value("${qwen.api.vl-model:qwen3-vl-plus}") String qwenVlModel,
                      ObjectMapper objectMapper,
-                     AiProperties aiProperties) {
+                     AiProperties aiProperties,
+                     OkHttpClient httpClient) {
         this.aiProperties = aiProperties;
         this.objectMapper = objectMapper;
         this.qwenVlModel = qwenVlModel;
+        this.httpClient = httpClient;
         // 初始化模型信息表
         models.put(ModelType.DeepSeek, new ModelInfo(deepSeekUrl, deepSeekKey, deepSeekModel));
         models.put(ModelType.Qwen, new ModelInfo(qwenUrl, qwenKey, qwenModel));
@@ -74,29 +83,21 @@ public class LLMClient {
         }
         String raw;
         try {
-            raw = webClient.post()
-                    .uri("/chat/completions")
-                    .contentType(MediaType.APPLICATION_JSON)
-                    .bodyValue(body)
-                    .retrieve()
-                    .bodyToMono(String.class)
-                    .block();
-        } catch (WebClientResponseException e) {
-            // DeepSeek/OpenAI-compatible APIs usually return a useful JSON error body; log it.
-            String respBody = e.getResponseBodyAsString();
-            if (respBody != null && !respBody.isBlank()) {
+            raw = postJson(this.baseUrl, this.apiKey, "/chat/completions", body);
+        } catch (HttpStatusException e) {
+            if (e.responseBody != null && !e.responseBody.isBlank()) {
                 logger.error("调用模型 chat/completions 失败: status={} {}",
-                        e.getStatusCode().value(), e.getStatusText(),  e);
+                        e.statusCode, e.statusText, e);
             } else {
                 logger.error("调用模型 chat/completions 失败: status={} {} (empty body)",
-                        e.getStatusCode().value(), e.getStatusText(), e);
+                        e.statusCode, e.statusText, e);
             }
-            throw new RuntimeException("调用模型 chat/completions 失败: " + e.getStatusCode().value(), e);
+            throw new RuntimeException("调用模型 chat/completions 失败: " + e.statusCode, e);
         } catch (Exception e) {
             logger.error("调用模型 chat/completions 失败", e);
             throw new RuntimeException("调用模型 chat/completions 失败", e);
         }
-        if (raw == null || raw.isEmpty()) {
+        if (raw.isEmpty()) {
             throw new RuntimeException("模型返回空响应");
         }
         try {
@@ -132,11 +133,7 @@ public class LLMClient {
             logger.error("尝试切换到未配置的模型: {}", type);
             return false;
         }
-        WebClient.Builder builder = WebClient.builder().baseUrl(info.url);
-        if (info.apiKey != null && !info.apiKey.isBlank()) {
-            builder.defaultHeader(HttpHeaders.AUTHORIZATION, "Bearer " + info.apiKey);
-        }
-        this.webClient = builder.build();
+        this.baseUrl = info.url;
         this.apiKey = info.apiKey;
         this.model = info.model;
         this.currentModelType = type;
@@ -150,28 +147,21 @@ public class LLMClient {
         Map<String, Object> request = buildRequest(userMessage, context, history, false);
         String raw;
         try {
-            raw = webClient.post()
-                    .uri("/chat/completions")
-                    .contentType(MediaType.APPLICATION_JSON)
-                    .bodyValue(request)
-                    .retrieve()
-                    .bodyToMono(String.class)
-                    .block(); // 阻塞拿到完整结果
-        } catch (WebClientResponseException e) {
-            String respBody = e.getResponseBodyAsString();
-            if (respBody != null && !respBody.isBlank()) {
+            raw = postJson(this.baseUrl, this.apiKey, "/chat/completions", request);
+        } catch (HttpStatusException e) {
+            if (e.responseBody != null && !e.responseBody.isBlank()) {
                 logger.error("调用模型接口失败: status={} {}",
-                        e.getStatusCode().value(), e.getStatusText(), e);
+                        e.statusCode, e.statusText, e);
             } else {
                 logger.error("调用模型接口失败: status={} {} (empty body)",
-                        e.getStatusCode().value(), e.getStatusText(), e);
+                        e.statusCode, e.statusText, e);
             }
-            throw new RuntimeException("调用模型接口失败: " + e.getStatusCode().value(), e);
+            throw new RuntimeException("调用模型接口失败: " + e.statusCode, e);
         } catch (Exception e) {
             logger.error("调用模型接口失败", e);
             throw new RuntimeException("调用模型接口失败", e);
         }
-        if (raw == null || raw.isEmpty()) {
+        if (raw.isEmpty()) {
             logger.error("模型返回空响应");
             throw new RuntimeException("模型返回空响应");
         }
@@ -224,7 +214,7 @@ public class LLMClient {
 
         messages.add(Map.of("role", "user", "content", userContentBuilder.toString()));
         logger.debug("构建消息完成: System规则长度={}, History条数={}, 最终User内容长度={}",
-                messages.get(0).get("content") != null ? String.valueOf(messages.get(0).get("content")).length() : 0,
+                messages.getFirst().get("content") != null ? String.valueOf(messages.getFirst().get("content")).length() : 0,
                 (history != null ? history.size() : 0),
                 userContentBuilder.length());
 
@@ -245,8 +235,6 @@ public class LLMClient {
         if (info == null) {
             throw new IllegalStateException("Qwen model is not configured.");
         }
-
-        WebClient client = buildWebClient(info);
         String prompt = (userText == null || userText.isBlank()) ? "请描述图片内容，并回答我可能想问的问题（如有）。" : userText.trim();
 
         List<Map<String, Object>> content = new ArrayList<>(imageUrls.size() + 1);
@@ -276,41 +264,52 @@ public class LLMClient {
 
         String raw;
         try {
-            raw = client.post()
-                    .uri("/chat/completions")
-                    .contentType(MediaType.APPLICATION_JSON)
-                    .bodyValue(request)
-                    .retrieve()
-                    .bodyToMono(String.class)
-                    .block();
-        } catch (WebClientResponseException e) {
-            String respBody = e.getResponseBodyAsString();
-            if (respBody != null && !respBody.isBlank()) {
+            raw = postJson(info.url, info.apiKey, "/chat/completions", request);
+        } catch (HttpStatusException e) {
+            if (e.responseBody != null && !e.responseBody.isBlank()) {
                 logger.error("调用千问多模态接口失败: status={} {}",
-                        e.getStatusCode().value(), e.getStatusText(), e);
+                        e.statusCode, e.statusText, e);
             } else {
                 logger.error("调用千问多模态接口失败: status={} {} (empty body)",
-                        e.getStatusCode().value(), e.getStatusText(), e);
+                        e.statusCode, e.statusText, e);
             }
-            throw new RuntimeException("调用千问多模态接口失败: " + e.getStatusCode().value(), e);
+            throw new RuntimeException("调用千问多模态接口失败: " + e.statusCode, e);
         } catch (Exception e) {
             logger.error("调用千问多模态接口失败", e);
             throw new RuntimeException("调用千问多模态接口失败", e);
         }
 
-        if (raw == null || raw.isEmpty()) {
+        if (raw.isEmpty()) {
             throw new RuntimeException("千问多模态返回空响应");
         }
         return extractFullContent(raw);
     }
 
 
-    private static WebClient buildWebClient(ModelInfo info) {
-        WebClient.Builder builder = WebClient.builder().baseUrl(info.url);
-        if (info.apiKey != null && !info.apiKey.isBlank()) {
-            builder.defaultHeader(HttpHeaders.AUTHORIZATION, "Bearer " + info.apiKey);
+    private String postJson(String baseUrl, @Nullable String apiKey, String path, Object body) throws Exception {
+        String json = objectMapper.writeValueAsString(body);
+        Request.Builder rb = new Request.Builder()
+                .url(joinUrl(baseUrl, path))
+                .post(RequestBody.create(json, JSON));
+        if (apiKey != null && !apiKey.isBlank()) {
+            rb.header(HttpHeaders.AUTHORIZATION, "Bearer " + apiKey);
         }
-        return builder.build();
+
+        try (Response resp = httpClient.newCall(rb.build()).execute()) {
+            String respBody = resp.body() != null ? resp.body().string() : "";
+            if (!resp.isSuccessful()) {
+                throw new HttpStatusException(resp.code(), resp.message(), respBody);
+            }
+            return respBody;
+        }
+    }
+
+    private static String joinUrl(String baseUrl, String path) {
+        if (baseUrl == null) baseUrl = "";
+        if (path == null) path = "";
+        String b = baseUrl.endsWith("/") ? baseUrl.substring(0, baseUrl.length() - 1) : baseUrl;
+        String p = path.startsWith("/") ? path : "/" + path;
+        return b + p;
     }
 
     private static String buildSystemPrompt(AiProperties.Prompt promptCfg) {
@@ -346,7 +345,7 @@ public class LLMClient {
                 JsonNode msgNode = errorNode.path("message");
                 String msg;
                 if (msgNode.isMissingNode() || msgNode.isNull()) msg = "模型返回错误";
-                else if (msgNode.isTextual()) msg = msgNode.textValue();
+                else if (msgNode.isString()) msg = msgNode.asString();
                 else msg = msgNode.toString();
                 logger.error("模型错误响应: {}", msg);
                 throw new RuntimeException(msg);
@@ -358,7 +357,7 @@ public class LLMClient {
                     .path("content");
             String content;
             if (contentNode.isMissingNode() || contentNode.isNull()) content = "";
-            else if (contentNode.isTextual()) content = contentNode.textValue();
+            else if (contentNode.isString()) content = contentNode.asString();
             else content = contentNode.toString();
 
             if (content.isEmpty()) {
@@ -382,6 +381,19 @@ public class LLMClient {
             this.url = url;
             this.apiKey = apiKey;
             this.model = model;
+        }
+    }
+
+    private static final class HttpStatusException extends RuntimeException {
+        final int statusCode;
+        final String statusText;
+        final String responseBody;
+
+        HttpStatusException(int statusCode, String statusText, String responseBody) {
+            super("HTTP " + statusCode + " " + statusText);
+            this.statusCode = statusCode;
+            this.statusText = statusText;
+            this.responseBody = responseBody;
         }
     }
 

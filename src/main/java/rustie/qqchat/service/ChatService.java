@@ -6,13 +6,17 @@ import rustie.qqchat.agent.ReActAgent;
 import rustie.qqchat.agent.tools.GenImageTool;
 import rustie.qqchat.client.LLMClient;
 import rustie.qqchat.model.dto.ChatMessage;
+import rustie.qqchat.model.dto.Response;
 import rustie.qqchat.model.entity.ChatTextSearchResult;
 import rustie.qqchat.utils.ImageIntentUtils;
 import rustie.qqchat.utils.IdHolder;
+import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
+import tools.jackson.databind.node.ObjectNode;
 
 
 import java.util.List;
+import java.util.function.Consumer;
 @Service
 @RequiredArgsConstructor
 public class ChatService {
@@ -22,7 +26,7 @@ public class ChatService {
     private final MessageHistoryService messageHistoryService;
     private final ReActAgent reActAgent;
     private final GenImageTool genImageTool;
-    private boolean groupAgentEnabled = false;
+    private boolean groupAgentEnabled = true;
     private boolean privateAgentEnabled = false;
 
     public boolean switchGroupAgentMode() {
@@ -34,68 +38,101 @@ public class ChatService {
         return privateAgentEnabled;
     }
 
-    public String normalChatPrivate(long userId, String userMessage) {
+    public Response normalChatPrivate(long userId, String userMessage) {
         return normalChatPrivate(userId, userMessage, List.of());
     }
 
-    public String normalChatPrivate(long userId, String userMessage, List<String> imageUrls) {
+    public Response normalChatPrivate(long userId, String userMessage, List<String> imageUrls) {
+        return normalChatPrivate(userId, userMessage, imageUrls, null);
+    }
+
+    public Response normalChatPrivate(long userId, String userMessage, List<String> imageUrls, Consumer<String> realtimeOut) {
+        // Agent模式下无图也要能触发生图（避免模型不主动选工具）
+
+        final String originalUserMessage = userMessage;
         if (imageUrls != null && !imageUrls.isEmpty()) {
             // Let DeepSeek decide whether to call image_understanding tool.
             String inputForAgent = userMessage + "\n\n(附：本轮携带了 " + imageUrls.size()
                     + " 张图片；若需要理解图片内容请调用 image_understanding 工具。或者你认为这是图片生成/修改,则直接调用gen_image工具即可)";
-            return agentChatPrivate(userId, inputForAgent);
+            return agentChatPrivate(userId, originalUserMessage, inputForAgent, realtimeOut);
         }
         if (privateAgentEnabled) {
-            return agentChatPrivate(userId, userMessage);
+            return agentChatPrivate(userId, originalUserMessage, originalUserMessage, realtimeOut);
         }
         List<ChatMessage> history = messageHistoryService.getPrivateHistory(userId);
-        String response = llmClient.normalResponse(userMessage, "", history);
-        messageHistoryService.savePrivateTurn(userId, userMessage, response);
-        return response;
+        String responseText = llmClient.normalResponse(userMessage, "", history);
+        messageHistoryService.savePrivateTurn(userId, userMessage, responseText);
+        return Response.ofText(responseText);
     }
 
-    public String normalChatGroup(long groupId, long groupMemberId, String userMessage) {
+    public Response normalChatGroup(long groupId, long groupMemberId, String userMessage) {
         return normalChatGroup(groupId, groupMemberId, userMessage, List.of());
     }
 
     /**
-     * If imageUrls is not empty: use Qwen-VL for image understanding.
-     * NOTE: image understanding is NOT persisted and NOT added to memory/history.
+     * If imageUrls is not empty: let agent decide whether to call image_understanding tool.
+     * Persist as: first user input + final model output (ignore intermediate tool calls).
      */
-    public String normalChatGroup(long groupId, long groupMemberId, String userMessage, List<String> imageUrls) {
+    public Response normalChatGroup(long groupId, long groupMemberId, String userMessage, List<String> imageUrls) {
+        return normalChatGroup(groupId, groupMemberId, userMessage, imageUrls, null);
+    }
+
+    public Response normalChatGroup(long groupId, long groupMemberId, String userMessage, List<String> imageUrls, Consumer<String> realtimeOut) {
+        // Agent模式下无图也要能触发生图（避免模型不主动选工具）
+        final String originalUserMessage = userMessage;
         if (imageUrls != null && !imageUrls.isEmpty()) {
             // Let DeepSeek decide whether to call image_understanding tool.
             String inputForAgent = userMessage + "\n\n(附：本轮携带了 " + imageUrls.size()
                     + " 张图片；若需要理解图片内容请调用 image_understanding 工具,或者你认为这是图片生成/修改,则直接调用gen_image工具即可.)";
-            return agentChatGroup(groupId, groupMemberId, inputForAgent);
+            return agentChatGroup(groupId, groupMemberId, originalUserMessage, inputForAgent, realtimeOut);
         }
         if (groupAgentEnabled) {
-            return agentChatGroup(groupId, groupMemberId, userMessage);
+            return agentChatGroup(groupId, groupMemberId, originalUserMessage, originalUserMessage, realtimeOut);
         }
         List<ChatMessage> history = messageHistoryService.getGroupHistory(groupId);
-        String response = llmClient.normalResponse(userMessage, "", history);
-        messageHistoryService.saveGroupTurn(groupId, groupMemberId, userMessage, response);
-        return response;
+        String responseText = llmClient.normalResponse(userMessage, "", history);
+        messageHistoryService.saveGroupTurn(groupId, groupMemberId, userMessage, responseText);
+        return Response.ofText(responseText);
     }
 
-    private String agentChatGroup(long groupId, long groupMemberId, String userMessage) {
+    private Response agentChatGroup(long groupId,
+                                 long groupMemberId,
+                                 String originalUserMessage,
+                                 String inputForAgent,
+                                 Consumer<String> realtimeOut) {
         try {
-            return reActAgent.run(userMessage, 8).output();
+            ReActAgent.Result r = reActAgent.run(inputForAgent, 8, realtimeOut);
+            maybePersistAgentTurnGroup(groupId, groupMemberId, originalUserMessage, r);
+            return toResponse(r);
         } catch (Exception e) {
-            return "Agent 运行失败: " + (e.getMessage() == null ? e.getClass().getSimpleName() : e.getMessage());
+            return Response.ofText("Agent 运行失败: " + (e.getMessage() == null ? e.getClass().getSimpleName() : e.getMessage()));
         } finally {
             IdHolder.removeAll();
         }
     }
 
-    private String agentChatPrivate(long userId, String userMessage) {
+    private Response agentChatPrivate(long userId,
+                                   String originalUserMessage,
+                                   String inputForAgent,
+                                   Consumer<String> realtimeOut) {
         try {
-            return reActAgent.run(userMessage, 8).output();
+            ReActAgent.Result r = reActAgent.run(inputForAgent, 8, realtimeOut);
+            maybePersistAgentTurnPrivate(userId, originalUserMessage, r);
+            return toResponse(r);
         } catch (Exception e) {
-            return "Agent 运行失败: " + (e.getMessage() == null ? e.getClass().getSimpleName() : e.getMessage());
+            return Response.ofText("Agent 运行失败: " + (e.getMessage() == null ? e.getClass().getSimpleName() : e.getMessage()));
         } finally {
             IdHolder.removeAll();
         }
+    }
+
+    private static Response toResponse(ReActAgent.Result r) {
+        if (r == null) return Response.ofText("");
+        if (r.urls() != null && !r.urls().isEmpty()) {
+            // gen_image: URLs should be rendered as MsgUtils.img(url), not as plain text.
+            return Response.of("", r.urls());
+        }
+        return Response.ofText(r.output());
     }
 
     public boolean isGroupAgentEnabled() {
@@ -133,6 +170,36 @@ public class ChatService {
 
     public void clearGroupHistory(long groupId) {
         messageHistoryService.clearGroupHistory(groupId);
+    }
+
+    private void maybePersistAgentTurnGroup(long groupId, long groupMemberId, String userMessage, ReActAgent.Result r) {
+        if (r == null) return;
+        // For image understanding: persist user first input + final output, ignore tool-call steps.
+        // Also persist normal "final" answers in agent mode for continuity.
+        if (r.usedImageUnderstanding() || "final".equals(r.stopReason())) {
+            messageHistoryService.saveGroupTurn(groupId, groupMemberId, userMessage, r.output());
+        }
+    }
+
+    private void maybePersistAgentTurnPrivate(long userId, String userMessage, ReActAgent.Result r) {
+        if (r == null) return;
+        if (r.usedImageUnderstanding() || "final".equals(r.stopReason())) {
+            messageHistoryService.savePrivateTurn(userId, userMessage, r.output());
+        }
+    }
+
+    private String directGenImage(String prompt) {
+        try {
+            ObjectNode args = objectMapper.createObjectNode();
+            args.put("prompt", prompt == null ? "" : prompt);
+            JsonNode result = genImageTool.execute(args, objectMapper);
+            return genImageTool.toUserText(result, objectMapper);
+        } catch (Exception e) {
+            return "生图失败: " + (e.getMessage() == null ? e.getClass().getSimpleName() : e.getMessage());
+        } finally {
+            // keep consistent with other flows
+            IdHolder.removeAll();
+        }
     }
 
 }

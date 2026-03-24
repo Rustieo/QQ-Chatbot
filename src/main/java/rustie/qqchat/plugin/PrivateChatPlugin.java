@@ -7,11 +7,13 @@ import com.mikuac.shiro.core.Bot;
 import com.mikuac.shiro.dto.event.message.PrivateMessageEvent;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
+import rustie.qqchat.model.dto.Response;
 import rustie.qqchat.utils.ChatUtils;
 import rustie.qqchat.utils.IdHolder;
 import rustie.qqchat.service.ChatService;
 
 import java.util.List;
+import java.util.function.Consumer;
 
 @Shiro
 @Component
@@ -33,9 +35,25 @@ public class PrivateChatPlugin {
         String message = rawMessage.replaceAll("\\s+", " ").trim();
         List<String> imageUrls = ChatUtils.getEventImageUrls(event);
         IdHolder.setImageUrls(imageUrls);
-        String response = chatService.normalChatPrivate(event.getUserId(), message, imageUrls);
-        String sendMsg = MsgUtils.builder().text(response).build();
-        bot.sendPrivateMsg(event.getUserId(), sendMsg, false);
+        Consumer<String> realtimeOut = (s) -> {
+            if (s == null || s.isBlank()) return;
+            bot.sendPrivateMsg(event.getUserId(), MsgUtils.builder().text(s).build(), false);
+        };
+        Response response = chatService.normalChatPrivate(event.getUserId(), message, imageUrls, realtimeOut);
+
+        MsgUtils builder = MsgUtils.builder();
+        if (response != null) {
+            if (response.getText() != null && !response.getText().isBlank()) {
+                builder.text(response.getText());
+            }
+            if (response.getUrls() != null) {
+                for (String url : response.getUrls()) {
+                    if (url == null || url.isBlank()) continue;
+                    builder.img(url);
+                }
+            }
+        }
+        bot.sendPrivateMsg(event.getUserId(), builder.build(), false);
     }
 
 }

@@ -16,7 +16,7 @@ public class OkHttpClientConfig {
     public OkHttpClient okHttpClient() {
         return new OkHttpClient.Builder()
                 .connectTimeout(Duration.ofMillis(5_000))
-                .readTimeout(Duration.ofMillis(10_000))
+                .readTimeout(Duration.ofMillis(50_000))
                 .writeTimeout(Duration.ofSeconds(30))
                 .callTimeout(Duration.ofSeconds(60))
                 .build();
